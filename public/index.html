@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DV Classroom - Join Your Class</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-logo">
+                <div class="icms-logo-wrap icms-logo--brand">
+                    <div class="icms-text-wrap">
+                        <span class="icms-logo-text">i-CMS</span>
+                    </div>
+                    <div class="icms-dv-badge">
+                        <span class="icms-dv-by">by</span>
+                        <img src="/Logos/DV-Logo.png" alt="DV Analytics" class="icms-dv-img" />
+                    </div>
+                </div>
+            </div>
+            <h1 class="hero-title">Welcome to DV Classroom</h1>
+            <p class="hero-subtitle">Join your live class and engage with your peers</p>
+            <div class="hero-description">
+                <p>A modern, secure platform designed for seamless classroom management and live learning experiences.</p>
+            </div>
+            <div class="hero-actions">
+                <button class="btn btn-primary btn-large" onclick="openLoginModal()">
+                    <span class="btn-text">Join Class</span>
+                    <span class="btn-icon">→</span>
+                </button>
+                <button class="btn btn-secondary btn-large" onclick="openIssueModal()">
+                    <span class="btn-text">Report Issue</span>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Sessions Selection Screen -->
+    <section id="sessionsScreen" class="sessions-screen hidden">
+        <div class="sessions-header">
+            <div class="sessions-header-content">
+                <div class="icms-logo-wrap">
+                    <div class="icms-text-wrap">
+                        <span class="icms-logo-text">i-CMS</span>
+                    </div>
+                    <div class="icms-dv-badge">
+                        <span class="icms-dv-by">by</span>
+                        <img src="/Logos/DV-Logo.png" alt="DV Analytics" class="icms-dv-img" />
+                    </div>
+                </div>
+                <div>
+                    <h2 class="sessions-title">Available Classes</h2>
+                    <p class="sessions-subtitle" id="studentGreeting">Select a session to join</p>
+                </div>
+            </div>
+               <div class="sessions-header-actions">
+                   <button class="btn btn-secondary" onclick="openIssueModal()">Report Issue</button>
+                   <button class="btn-logout" onclick="logoutSession()">Logout</button>
+               </div>
+        </div>
+        <div id="sessionsContainer" class="sessions-container"></div>
+    </section>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeLoginModal()"></div>
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2 class="modal-title">Class Login</h2>
+                <button class="modal-close" onclick="closeLoginModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="loginForm" onsubmit="handleLogin(event)">
+                    <!-- LMS ID Input -->
+                    <div class="form-group">
+                        <label for="lmsId" class="form-label">LMS ID *</label>
+                        <input 
+                            type="text" 
+                            id="lmsId" 
+                            class="form-input" 
+                            placeholder="e.g., LMS1001"
+                            required
+                            autocomplete="off"
+                        >
+                        <span class="form-error" id="lmsIdError"></span>
+                    </div>
+
+                    <!-- Student Name Input -->
+                    <div class="form-group">
+                        <label for="studentName" class="form-label">Student Name *</label>
+                        <input 
+                            type="text" 
+                            id="studentName" 
+                            class="form-input" 
+                            placeholder="e.g., Rahul Kumar"
+                            required
+                            autocomplete="off"
+                        >
+                        <span class="form-error" id="nameError"></span>
+                    </div>
+
+                    <!-- Remember Device Checkbox -->
+                    <div class="form-group checkbox">
+                        <input 
+                            type="checkbox" 
+                            id="rememberDevice" 
+                            class="form-checkbox"
+                            checked
+                        >
+                        <label for="rememberDevice" class="form-label-small">Remember this device</label>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" class="btn btn-primary btn-block">
+                        <span id="submitButtonText">Login & Join Class</span>
+                        <span class="loader hidden" id="submitLoader"></span>
+                    </button>
+                </form>
+
+                <!-- Help Text -->
+                <div class="modal-footer">
+                    <p class="help-text">Don't have credentials? Contact your instructor.</p>
+                    <p class="help-text">Need help with the login flow? <a href="#" onclick="openIssueModal(); return false;">Report an issue</a>.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Issue Report Modal -->
+    <div id="issueModal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeIssueModal()"></div>
+        <div class="modal-container modal-issue">
+            <div class="modal-header">
+                <h2 class="modal-title">Report an Issue</h2>
+                <button class="modal-close" onclick="closeIssueModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="issueForm" onsubmit="handleIssueReport(event)">
+                    <div class="form-group">
+                        <label for="issueLmsId" class="form-label">LMS ID *</label>
+                        <input
+                            type="text"
+                            id="issueLmsId"
+                            class="form-input"
+                            placeholder="e.g., LMS1001"
+                            required
+                            autocomplete="off"
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label for="issueName" class="form-label">Name *</label>
+                        <input
+                            type="text"
+                            id="issueName"
+                            class="form-input"
+                            placeholder="e.g., Rahul Kumar"
+                            required
+                            autocomplete="off"
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label for="issuePhoneNumber" class="form-label">Phone Number</label>
+                        <input
+                            type="tel"
+                            id="issuePhoneNumber"
+                            class="form-input"
+                            placeholder="e.g., +91 98765 43210"
+                            autocomplete="off"
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label for="issueDescription" class="form-label">Issue Description *</label>
+                        <textarea
+                            id="issueDescription"
+                            class="form-input"
+                            placeholder="Describe the issue you are facing"
+                            rows="5"
+                            required
+                        ></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-block">
+                        <span id="issueSubmitText">Submit Issue</span>
+                        <span class="loader hidden" id="issueSubmitLoader"></span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Toast -->
+    <div id="errorToast" class="toast toast-error hidden">
+        <div class="toast-content">
+            <span class="toast-icon">✕</span>
+            <span id="errorToastMessage"></span>
+        </div>
+        <div class="toast-close" onclick="closeErrorToast()">×</div>
+    </div>
+
+    <!-- Success Toast -->
+    <div id="successToast" class="toast toast-success hidden">
+        <div class="toast-content">
+            <span class="toast-icon">✓</span>
+            <span id="successToastMessage"></span>
+        </div>
+        <div class="toast-close" onclick="closeSuccessToast()">×</div>
+    </div>
+
+    <!-- Already Logged In Modal -->
+    <div id="alreadyLoggedInModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-container modal-alert">
+            <div class="modal-header">
+                <h2 class="modal-title">Active Session Detected</h2>
+            </div>
+            <div class="modal-body">
+                <div class="alert-content">
+                    <p class="alert-icon">⚠️</p>
+                    <p class="alert-message">You are already logged in on another device.</p>
+                    <p class="alert-submessage">Only one device can be active at a time for security.</p>
+                </div>
+            </div>
+            <div class="modal-footer modal-actions">
+                <button class="btn btn-secondary" onclick="closeAlreadyLoggedInModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="forceLogoutOtherDevice()">Clear Active Session</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Modal -->
+    <div id="loadingModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-container modal-loading">
+            <div class="spinner"></div>
+            <p class="loading-text">Connecting to your class...</p>
+        </div>
+    </div>
+
+    <!-- Zoom Container -->
+    <div id="zoomContainer" class="hidden">
+        <div id="meetingSDKElement"></div>
+    </div>
+
+    <!-- Zoom Meeting SDK (Client View) mounts here -->
+    <div id="zmmtg-root"></div>
+
+    <!-- Scripts -->
+    <!-- Zoom Meeting SDK Dependencies (must load BEFORE Zoom SDK) -->
+    <script src="https://cdn.jsdelivr.net/npm/@zoom/meetingsdk@6.0.0/dist/lib/vendor/react.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@zoom/meetingsdk@6.0.0/dist/lib/vendor/react-dom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@zoom/meetingsdk@6.0.0/dist/lib/vendor/redux.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@zoom/meetingsdk@6.0.0/dist/lib/vendor/redux-thunk.min.js"></script>
+    
+    <!-- Zoom Meeting SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@zoom/meetingsdk@6.0.0/dist/zoom-meeting-6.0.0.min.js"></script>
+    
+    <!-- App Script -->
+    <script src="script.js"></script>
+</body>
+</html>
