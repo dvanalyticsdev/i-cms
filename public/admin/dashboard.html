@@ -54,9 +54,6 @@
             <a href="#issue-section" class="nav-item" data-tab="issue-section">
                 <span class="nav-text">Issue Section</span>
             </a>
-            <a href="#settings" class="nav-item" data-tab="settings">
-                <span class="nav-text">Settings</span>
-            </a>
         </nav>
     </aside>
 
@@ -155,12 +152,13 @@
                         <tr>
                             <th>Course Name</th>
                             <th>Description</th>
+                            <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="coursesList">
                         <tr class="loading-row">
-                            <td colspan="3" style="text-align: center; padding: 40px;">
+                            <td colspan="4" style="text-align: center; padding: 40px;">
                                 <div class="spinner"></div>
                                 <p>Loading courses...</p>
                             </td>
@@ -177,9 +175,14 @@
                     <h2 class="section-title">Session Logs</h2>
                     <p class="section-subtitle">Track and review class session activity in real time</p>
                 </div>
-                <button class="btn btn-secondary" onclick="loadSessionLogs(1)">
-                    <span>🔄 Refresh</span>
-                </button>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <button class="btn btn-danger" onclick="clearSessionLogs()">
+                        <span>Clear Log</span>
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadSessionLogs(1)">
+                        <span>Refresh</span>
+                    </button>
+                </div>
             </div>
 
             <div class="table-toolbar table-toolbar-wrap">
@@ -390,9 +393,14 @@
                     <h2 class="section-title">Student Database</h2>
                     <p class="section-subtitle">View and manage all students</p>
                 </div>
-                <button class="btn btn-primary" onclick="openAddStudentModal()">
-                    <span>Add Student</span>
-                </button>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" onclick="openExportDatabaseModal('students')">
+                        <span>Export Student Database</span>
+                    </button>
+                    <button class="btn btn-primary" onclick="openAddStudentModal()">
+                        <span>Add Student</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Stats -->
@@ -496,23 +504,6 @@
             </div>
         </section>
 
-        <!-- Settings Tab -->
-        <section id="settings-tab" class="tab-content">
-            <div class="section-header">
-                <div>
-                    <h2 class="section-title">Settings</h2>
-                    <p class="section-subtitle">Administrative tools and data export controls</p>
-                </div>
-            </div>
-
-            <div class="settings-grid">
-                <div class="settings-card">
-                    <h3>Export Database</h3>
-                    <p>Download all application data for backup, migration, or offline analysis.</p>
-                    <button class="btn btn-primary" onclick="openExportDatabaseModal()">Export Database</button>
-                </div>
-            </div>
-        </section>
     </main>
 
     <!-- Create/Edit Session Modal -->
@@ -668,11 +659,11 @@
         <div class="modal-overlay" onclick="closeExportDatabaseModal()"></div>
         <div class="modal-container" style="max-width: 420px;">
             <div class="modal-header">
-                <h3 class="modal-title">Export Database</h3>
+                <h3 class="modal-title" id="exportModalTitle">Export Data</h3>
                 <button class="modal-close" onclick="closeExportDatabaseModal()">Close</button>
             </div>
             <div class="modal-body">
-                <p class="delete-warning">Choose an export format. The download includes all application data.</p>
+                <p class="delete-warning" id="exportModalDescription">Choose an export format for this download.</p>
                 <div class="form-group">
                     <label class="form-label">Export Format</label>
                     <select id="exportFormat" class="form-input">

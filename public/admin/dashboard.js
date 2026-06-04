@@ -28,6 +28,7 @@ let sessionLogsQuery = {
 };
 let sessionLogsSearchTimer = null;
 let currentExportFormat = 'json';
+let currentExportScope = 'all';
 
 // ====================================
 // INITIALIZATION
@@ -35,6 +36,7 @@ let currentExportFormat = 'json';
 
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
+    restorePendingToast();
     setupEventListeners();
     loadCourses(); // Load courses for the form
     loadSessions();
@@ -64,6 +66,29 @@ function checkAuth() {
 
     const username = localStorage.getItem('adminUsername');
     document.getElementById('adminUsername').textContent = username || 'Admin';
+}
+
+function restorePendingToast() {
+    const pendingToast = sessionStorage.getItem('adminPendingToast');
+    if (!pendingToast) {
+        return;
+    }
+
+    sessionStorage.removeItem('adminPendingToast');
+
+    try {
+        const { message, type } = JSON.parse(pendingToast);
+        if (message) {
+            showToast(message, type || 'success');
+        }
+    } catch (error) {
+        console.warn('Unable to restore pending toast:', error);
+    }
+}
+
+function triggerFullSiteRefresh(message, type = 'success') {
+    sessionStorage.setItem('adminPendingToast', JSON.stringify({ message, type }));
+    window.location.reload();
 }
 
 /**
@@ -550,7 +575,7 @@ function renderCourseManagement() {
     if (filteredCourses.length === 0) {
         coursesList.innerHTML = `
             <tr>
-                <td colspan="3" style="text-align: center; padding: 40px;">
+                <td colspan="4" style="text-align: center; padding: 40px;">
                     <p style="color: #999;">No courses found. <a href="#" onclick="openCreateCourseModal(); return false;" style="color: #667eea;">Add one now</a></p>
                 </td>
             </tr>
@@ -562,6 +587,7 @@ function renderCourseManagement() {
         <tr>
             <td><strong>${escapeHtml(course.courseName)}</strong></td>
             <td>${course.description ? escapeHtml(course.description) : '-'}</td>
+            <td><span class="status-badge active">Active</span></td>
             <td>
                 <div class="actions">
                     <button class="btn-action edit" onclick="openEditCourseModal('${course._id}')" title="Edit">Edit</button>
@@ -651,7 +677,12 @@ async function handleSaveCourse(event) {
             throw new Error(data.message || 'Failed to save course');
         }
 
-        showToast(isCreate ? 'Course created successfully' : 'Course updated successfully', 'success');
+        if (isCreate) {
+            triggerFullSiteRefresh('Course created successfully');
+            return;
+        }
+
+        showToast('Course updated successfully', 'success');
         closeCourseModal();
         loadCourses();
     } catch (error) {
@@ -696,9 +727,8 @@ async function confirmDeleteCourse() {
             throw new Error(data.message || 'Failed to delete course');
         }
 
-        showToast('Course deleted successfully', 'success');
         closeDeleteCourseModal();
-        loadCourses();
+        triggerFullSiteRefresh('Course deleted successfully');
     } catch (error) {
         console.error('Error deleting course:', error);
         showToast(error.message || 'Error deleting course', 'error');
@@ -881,12 +911,62 @@ async function loadSessionLogs(page = 1) {
     }
 }
 
+async function clearSessionLogs() {
+    if (!confirm('Are you sure you want to clear all session logs? This action cannot be undone.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/session-logs`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.message || 'Failed to clear session logs');
+        }
+
+        allSessionLogs = [];
+        sessionLogsMeta = {
+            page: 1,
+            limit: parseInt(document.getElementById('sessionLogPageSize')?.value || '10', 10),
+            total: 0,
+            totalPages: 1
+        };
+        renderSessionLogs();
+        showToast('Session logs cleared successfully', 'success');
+    } catch (error) {
+        console.error('Error clearing session logs:', error);
+        showToast(error.message || 'Error clearing session logs', 'error');
+    }
+}
+
 // ====================================
 // EXPORT DATABASE
 // ====================================
 
-function openExportDatabaseModal() {
+function openExportDatabaseModal(scope = 'all') {
+    currentExportScope = scope;
     currentExportFormat = document.getElementById('exportFormat')?.value || 'json';
+    const title = document.getElementById('exportModalTitle');
+    const description = document.getElementById('exportModalDescription');
+
+    if (scope === 'students') {
+        if (title) title.textContent = 'Export Student Database';
+        if (description) description.textContent = 'Choose an export format. The download will include student records only.';
+    } else {
+        if (title) title.textContent = 'Export Data';
+        if (description) description.textContent = 'Choose an export format for this download.';
+    }
+
     document.getElementById('exportDatabaseModal').classList.remove('hidden');
 }
 
@@ -904,7 +984,12 @@ async function confirmExportDatabase() {
     exportText.textContent = 'Exporting...';
 
     try {
-        const response = await fetch(`${API_BASE_URL}/export-database?format=${encodeURIComponent(selectedFormat)}`, {
+        const params = new URLSearchParams({
+            format: selectedFormat,
+            scope: currentExportScope
+        });
+
+        const response = await fetch(`${API_BASE_URL}/export-database?${params.toString()}`, {
             headers: {
                 'Authorization': `Bearer ${authToken}`
             }
@@ -919,13 +1004,15 @@ async function confirmExportDatabase() {
         const downloadUrl = window.URL.createObjectURL(blob);
         const downloadLink = document.createElement('a');
         downloadLink.href = downloadUrl;
-        downloadLink.download = `dv-database-export-${Date.now()}.${selectedFormat === 'excel' ? 'xlsx' : selectedFormat}`;
+        const filenamePrefix = currentExportScope === 'students' ? 'dv-student-database-export' : 'dv-database-export';
+        downloadLink.download = `${filenamePrefix}-${Date.now()}.${selectedFormat === 'excel' ? 'xlsx' : selectedFormat}`;
         document.body.appendChild(downloadLink);
         downloadLink.click();
         downloadLink.remove();
         window.URL.revokeObjectURL(downloadUrl);
 
-        showToast(`Database exported successfully as ${selectedFormat.toUpperCase()}`, 'success');
+        const label = currentExportScope === 'students' ? 'Student database' : 'Database';
+        showToast(`${label} exported successfully as ${selectedFormat.toUpperCase()}`, 'success');
         closeExportDatabaseModal();
     } catch (error) {
         console.error('Error exporting database:', error);

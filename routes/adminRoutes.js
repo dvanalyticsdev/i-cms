@@ -221,6 +221,27 @@ router.get('/session-logs', authMiddleware, async (req, res) => {
 });
 
 /**
+ * DELETE /api/admin/session-logs
+ */
+router.delete('/session-logs', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const result = await SessionLog.deleteMany({});
+    return res.status(200).json({
+      success: true,
+      message: 'Session logs cleared successfully',
+      deletedCount: result.deletedCount || 0
+    });
+  } catch (error) {
+    console.error('Error clearing session logs:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
  * POST /api/admin/login
  */
 router.post('/login', async (req, res) => {
@@ -510,6 +531,7 @@ router.get('/courses', authMiddleware, async (req, res) => {
       return;
     }
 
+    await Course.updateMany({ status: { $ne: 'active' } }, { $set: { status: 'active' } });
     const courses = await Course.find({}).sort({ createdAt: -1 }).lean();
     return res.status(200).json({
       success: true,
@@ -630,8 +652,12 @@ router.get('/export-database', authMiddleware, async (req, res) => {
     }
 
     const format = normalizeText(req.query.format || 'json').toLowerCase();
+    const scope = normalizeText(req.query.scope || 'all').toLowerCase();
     if (!['csv', 'excel', 'json'].includes(format)) {
       return res.status(400).json({ success: false, message: 'Format must be csv, excel, or json' });
+    }
+    if (!['all', 'students'].includes(scope)) {
+      return res.status(400).json({ success: false, message: 'Scope must be all or students' });
     }
 
     const [courses, sessions, sessionLogs, students, activeSessions, guestIds, issues] = await Promise.all([
@@ -643,6 +669,51 @@ router.get('/export-database', authMiddleware, async (req, res) => {
       GuestMentorId.find({}).sort({ createdAt: -1 }).lean(),
       IssueReport.find({}).sort({ createdAt: -1 }).lean()
     ]);
+
+    if (scope === 'students') {
+      const studentPayload = {
+        exportedAt: new Date().toISOString(),
+        exportedBy: req.admin.username,
+        students
+      };
+
+      if (format === 'json') {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="dv-student-database-export-${Date.now()}.json"`);
+        return res.status(200).send(JSON.stringify(studentPayload, null, 2));
+      }
+
+      if (format === 'csv') {
+        const csvLines = ['collection,field,value'];
+        students.forEach(record => {
+          const flattened = flattenDocument(record);
+          csvLines.push([
+            escapeCsvValue('students'),
+            escapeCsvValue('documentId'),
+            escapeCsvValue(record._id ? String(record._id) : '')
+          ].join(','));
+          Object.entries(flattened).forEach(([key, value]) => {
+            csvLines.push([
+              escapeCsvValue('students'),
+              escapeCsvValue(key),
+              escapeCsvValue(value)
+            ].join(','));
+          });
+        });
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="dv-student-database-export-${Date.now()}.csv"`);
+        return res.status(200).send(csvLines.join('\n'));
+      }
+
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(students.map(flattenDocument));
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Students');
+      const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="dv-student-database-export-${Date.now()}.xlsx"`);
+      return res.status(200).send(buffer);
+    }
 
     const exportPayload = {
       exportedAt: new Date().toISOString(),
