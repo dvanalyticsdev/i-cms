@@ -55,9 +55,8 @@
     rgba(255,255,255,0.24) 50%,
     transparent 80%
   );
-  animation: icms-shimmer 5.5s ease-in-out infinite;
-  animation-delay: 1.2s;
   pointer-events: none;
+  display: none;
 }
 
 /* Main i-CMS text */
@@ -67,9 +66,11 @@
   font-size: 1.55rem;
   font-weight: 900;
   letter-spacing: 0.16em;
-  animation:
-    icms-color-cycle 7s ease-in-out infinite,
-    icms-pulse       4s ease-in-out infinite;
+  background: linear-gradient(135deg, #ff7a18 0%, #f97316 36%, #1d4ed8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
   line-height: 1.1;
 }
 

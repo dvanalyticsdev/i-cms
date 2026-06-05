@@ -59,24 +59,6 @@
             height: auto;
         }
 
-        /* i-CMS animated logo */
-        @keyframes icms-color-cycle {
-          0%   { color: #ff6b00; text-shadow: 0 0 12px rgba(255,107,0,.95), 0 0 32px rgba(255,107,0,.6), 0 0 68px rgba(255,107,0,.28); }
-          25%  { color: #00d4ff; text-shadow: 0 0 12px rgba(0,212,255,.95), 0 0 32px rgba(0,212,255,.6), 0 0 68px rgba(0,212,255,.28); }
-          50%  { color: #8b5cf6; text-shadow: 0 0 12px rgba(139,92,246,.95), 0 0 32px rgba(139,92,246,.6), 0 0 68px rgba(139,92,246,.28); }
-          75%  { color: #ff0080; text-shadow: 0 0 12px rgba(255,0,128,.95), 0 0 32px rgba(255,0,128,.6), 0 0 68px rgba(255,0,128,.28); }
-          100% { color: #ff6b00; text-shadow: 0 0 12px rgba(255,107,0,.95), 0 0 32px rgba(255,107,0,.6), 0 0 68px rgba(255,107,0,.28); }
-        }
-        @keyframes icms-shimmer {
-          0%   { transform: translateX(-130%) skewX(-18deg); opacity: 0; }
-          8%   { opacity: 1; }
-          92%  { opacity: 1; }
-          100% { transform: translateX(260%) skewX(-18deg); opacity: 0; }
-        }
-        @keyframes icms-pulse {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.78; }
-        }
         .icms-logo-wrap {
           display: flex;
           flex-direction: column;
@@ -96,9 +78,8 @@
           top: 0; left: 0;
           height: 100%; width: 36%;
           background: linear-gradient(108deg, transparent 20%, rgba(255,255,255,0.24) 50%, transparent 80%);
-          animation: icms-shimmer 5.5s ease-in-out infinite;
-          animation-delay: 1.2s;
           pointer-events: none;
+                    display: none;
         }
         .icms-logo-text {
           display: block;
@@ -106,7 +87,11 @@
           font-size: 2.2rem;
           font-weight: 900;
           letter-spacing: 0.2em;
-          animation: icms-color-cycle 7s ease-in-out infinite, icms-pulse 4s ease-in-out infinite;
+                    background: linear-gradient(135deg, #ff7a18 0%, #f97316 36%, #1d4ed8 100%);
+                    -webkit-background-clip: text;
+                    background-clip: text;
+                    color: transparent;
+                    -webkit-text-fill-color: transparent;
           line-height: 1.1;
         }
         .icms-dv-badge {
