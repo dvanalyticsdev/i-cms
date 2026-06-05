@@ -8,6 +8,7 @@ const { ensureMongoConnection, isMongoConnected } = require('./utils/mongoConnec
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const attendanceRoutes = require('./routes/attendanceRoutes');
 const sessionRoutes = require('./routes/sessionRoutes');
 const issueRoutes = require('./routes/issueRoutes');
 
@@ -24,8 +25,7 @@ const PORT = process.env.PORT || 3000;
  * MongoDB is used for:
  * - Class sessions management
  * - Active session tracking
- * 
- * students.json remains local for student authentication
+ * - Student authentication and profile data
  */
 const initializeDatabase = async () => {
   try {
@@ -33,7 +33,7 @@ const initializeDatabase = async () => {
 
     if (!connected) {
       console.warn('⚠️  MONGODB_URI not configured. MongoDB features will be unavailable.');
-      console.warn('    Students can still login and access sessions, but admin features will not work.');
+      console.warn('    Student login, attendance, and admin features will not work until MongoDB is available.');
       return;
     }
 
@@ -126,6 +126,7 @@ app.use('/api', issueRoutes);
 
 // Admin API Routes (with authentication)
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/attendance', attendanceRoutes);
 
 // Serve admin dashboard
 app.get('/admin/login', (req, res) => {

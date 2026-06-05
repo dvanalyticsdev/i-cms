@@ -24,6 +24,12 @@ const activeSessionSchema = new mongoose.Schema(
       required: true,
       trim: true
     },
+    phoneNumber: {
+      type: String,
+      required: false,
+      default: null,
+      trim: true
+    },
     deviceToken: {
       type: String,
       required: true,

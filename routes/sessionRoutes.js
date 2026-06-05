@@ -4,6 +4,7 @@ const ClassSession = require('../models/ClassSession');
 const ActiveSession = require('../models/ActiveSession');
 const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
+const AttendanceRecord = require('../models/AttendanceRecord');
 const { generateZoomSignature } = require('../utils/zoomSignature');
 const { logSessionActivity } = require('../utils/sessionLogger');
 
@@ -128,10 +129,35 @@ router.post('/join-session', async (req, res) => {
 
     try {
       if (lmsId) {
+        const student = await Student.findOne({ lmsId }).lean();
         await ActiveSession.updateOne(
           { lmsId: lmsId, status: 'active' },
           { $set: { classSessionId: session.sessionId, meetingNumber: session.meetingNumber, joinedAt: new Date() } }
         );
+
+        if (student) {
+          const attendanceDate = new Date().toLocaleDateString('en-CA');
+          await AttendanceRecord.updateOne(
+            { lmsId, sessionId: session.sessionId },
+            {
+              $set: {
+                lmsId,
+                studentName: student.name || lmsId,
+                phoneNumber: student.phoneNumber || '',
+                course: Array.isArray(student.course) ? student.course[0] || '' : (student.course || ''),
+                batch: student.batch || '',
+                sessionId: session.sessionId,
+                sessionName: session.title,
+                trainerName: session.createdBy || '',
+                attendanceDate,
+                attendedAt: new Date(),
+                status: 'present',
+                source: 'session-join'
+              }
+            },
+            { upsert: true }
+          );
+        }
 
         await logSessionActivity({
           sessionId: session.sessionId,

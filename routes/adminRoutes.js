@@ -10,6 +10,7 @@ const GuestMentorId = require('../models/GuestMentorId');
 const IssueReport = require('../models/IssueReport');
 const SessionLog = require('../models/SessionLog');
 const { logSessionActivity } = require('../utils/sessionLogger');
+const { sanitizeLmsId, normalizePhoneNumber, isValidPhoneNumber } = require('../utils/studentValidation');
 const XLSX = require('xlsx');
 const crypto = require('crypto');
 
@@ -931,14 +932,34 @@ router.get('/students', authMiddleware, async (req, res) => {
  */
 router.post('/students', authMiddleware, async (req, res) => {
   try {
-    const { lmsId, name, courses } = req.body;
-    if (!lmsId || !name || !courses || !Array.isArray(courses) || courses.length === 0) {
-      return res.status(400).json({ success: false, message: 'LMS ID, Name, and at least one Course are required' });
+    const { lmsId, name, phoneNumber, batch, courses } = req.body;
+    const sanitizedLmsId = sanitizeLmsId(lmsId);
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    const sanitizedBatch = normalizeText(batch);
+
+    if (!sanitizedLmsId || !name || !phoneNumber || !sanitizedBatch || !courses || !Array.isArray(courses) || courses.length === 0) {
+      return res.status(400).json({ success: false, message: 'LMS ID, Name, Phone Number, Batch, and at least one Course are required' });
+    }
+
+    if (!isValidPhoneNumber(normalizedPhoneNumber)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid phone number with 10 to 15 digits' });
+    }
+
+    const duplicateLmsId = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
+    if (duplicateLmsId) {
+      return res.status(400).json({ success: false, message: 'Student with this LMS ID already exists' });
+    }
+
+    const duplicatePhoneNumber = await Student.findOne({ phoneNumber: normalizedPhoneNumber }).lean();
+    if (duplicatePhoneNumber) {
+      return res.status(400).json({ success: false, message: 'Student with this phone number already exists' });
     }
 
     const newStudent = new Student({
-      lmsId: lmsId.trim(),
+      lmsId: sanitizedLmsId,
       name: name.trim(),
+      phoneNumber: normalizedPhoneNumber,
+      batch: sanitizedBatch,
       course: courses.map(c => c.trim()).filter(c => c)
     });
     
@@ -958,14 +979,36 @@ router.post('/students', authMiddleware, async (req, res) => {
 router.put('/students/:lmsId', authMiddleware, async (req, res) => {
   try {
     const { lmsId } = req.params;
-    const { name, courses } = req.body;
-    if (!name || !courses || !Array.isArray(courses) || courses.length === 0) {
-      return res.status(400).json({ success: false, message: 'Name and at least one Course are required' });
+    const { name, phoneNumber, batch, courses } = req.body;
+    const sanitizedLmsId = sanitizeLmsId(lmsId);
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    const sanitizedBatch = normalizeText(batch);
+
+    if (!name || !phoneNumber || !sanitizedBatch || !courses || !Array.isArray(courses) || courses.length === 0) {
+      return res.status(400).json({ success: false, message: 'Name, Phone Number, Batch, and at least one Course are required' });
+    }
+
+    if (!isValidPhoneNumber(normalizedPhoneNumber)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid phone number with 10 to 15 digits' });
+    }
+
+    const existingStudent = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
+    if (!existingStudent) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    const duplicatePhoneNumber = await Student.findOne({
+      phoneNumber: normalizedPhoneNumber,
+      lmsId: { $ne: sanitizedLmsId }
+    }).lean();
+
+    if (duplicatePhoneNumber) {
+      return res.status(400).json({ success: false, message: 'Student with this phone number already exists' });
     }
 
     const updated = await Student.findOneAndUpdate(
-      { lmsId },
-      { name: name.trim(), course: courses.map(c => c.trim()).filter(c => c) },
+      { lmsId: sanitizedLmsId },
+      { name: name.trim(), phoneNumber: normalizedPhoneNumber, batch: sanitizedBatch, course: courses.map(c => c.trim()).filter(c => c) },
       { new: true }
     ).lean();
 

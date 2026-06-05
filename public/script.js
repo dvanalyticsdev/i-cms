@@ -16,6 +16,15 @@ let availableSessions = [];
 let selectedSession = null;
 let sessionHeartbeatInterval = null; // Polling timer to detect remote session revocation
 
+function normalizePhoneNumber(phoneNumber) {
+  return String(phoneNumber || '').replace(/\D/g, '');
+}
+
+function isValidPhoneNumber(phoneNumber) {
+  const normalized = normalizePhoneNumber(phoneNumber);
+  return normalized.length >= 10 && normalized.length <= 15;
+}
+
 // ====================================
 // INITIALIZATION
 // ====================================
@@ -63,7 +72,7 @@ function openIssueModal() {
   }
 
   if (!issueName.value) {
-    issueName.value = document.getElementById('studentName').value.trim();
+    issueName.value = currentSession && currentSession.studentName ? currentSession.studentName : '';
   }
 
   if (issuePhoneNumber && !issuePhoneNumber.value) {
@@ -582,12 +591,13 @@ async function handleLogin(event) {
   // Get form values
   const lmsId = document.getElementById('lmsId').value.trim();
   const studentName = document.getElementById('studentName').value.trim();
+  const phoneNumber = document.getElementById('phoneNumber').value.trim();
 
   // Save attempt for the "already logged in" modal actions
-  lastLoginAttempt = { lmsId, studentName };
+  lastLoginAttempt = { lmsId, studentName, phoneNumber };
   
   // Validate form
-  if (!validateLoginForm(lmsId, studentName)) {
+  if (!validateLoginForm(lmsId, studentName, phoneNumber)) {
     return;
   }
   
@@ -604,6 +614,7 @@ async function handleLogin(event) {
       body: JSON.stringify({
         lmsId,
         name: studentName,
+        phoneNumber,
         deviceToken,
         forceLogin: forceLoginMode
       })
@@ -614,7 +625,7 @@ async function handleLogin(event) {
     if (data.success) {
       // Login successful
       forceLoginMode = false;
-      handleLoginSuccess(data, lmsId, studentName);
+      handleLoginSuccess(data, lmsId, studentName, phoneNumber);
     } else if (data.alreadyLoggedIn) {
       // Already logged in on another device
       setSubmitButtonLoading(false);
@@ -638,8 +649,8 @@ async function handleLogin(event) {
  */
 async function forceLogoutOtherDevice() {
   try {
-    if (!lastLoginAttempt || !lastLoginAttempt.lmsId || !lastLoginAttempt.studentName) {
-      showErrorToast('Missing login details. Please enter your LMS ID and name again.');
+    if (!lastLoginAttempt || !lastLoginAttempt.lmsId || !lastLoginAttempt.studentName || !lastLoginAttempt.phoneNumber) {
+      showErrorToast('Missing login details. Please enter your LMS ID, name, and phone number again.');
       closeAlreadyLoggedInModal();
       openLoginModal();
       return;
@@ -656,6 +667,7 @@ async function forceLogoutOtherDevice() {
       body: JSON.stringify({
         lmsId: lastLoginAttempt.lmsId,
         name: lastLoginAttempt.studentName,
+        phoneNumber: lastLoginAttempt.phoneNumber,
         deviceToken
       })
     });
@@ -676,6 +688,7 @@ async function forceLogoutOtherDevice() {
       body: JSON.stringify({
         lmsId: lastLoginAttempt.lmsId,
         name: lastLoginAttempt.studentName,
+        phoneNumber: lastLoginAttempt.phoneNumber,
         deviceToken,
         forceLogin: true
       })
@@ -687,7 +700,7 @@ async function forceLogoutOtherDevice() {
     if (data.success) {
       forceLoginMode = false;
       closeAlreadyLoggedInModal();
-      handleLoginSuccess(data, lastLoginAttempt.lmsId, lastLoginAttempt.studentName);
+      handleLoginSuccess(data, lastLoginAttempt.lmsId, lastLoginAttempt.studentName, lastLoginAttempt.phoneNumber);
       return;
     }
 
@@ -697,6 +710,7 @@ async function forceLogoutOtherDevice() {
     openLoginModal();
     document.getElementById('lmsId').value = lastLoginAttempt.lmsId;
     document.getElementById('studentName').value = lastLoginAttempt.studentName;
+    document.getElementById('phoneNumber').value = lastLoginAttempt.phoneNumber;
   } catch (error) {
     console.error('Force logout error:', error);
     hideLoadingModal();
@@ -707,18 +721,19 @@ async function forceLogoutOtherDevice() {
 /**
  * Handle successful login
  */
-async function handleLoginSuccess(data, lmsId, studentName) {
+async function handleLoginSuccess(data, lmsId, studentName, phoneNumber) {
   // Save session to localStorage
   currentSession = {
     sessionId: data.sessionToken || data.sessionId,
     lmsId,
-    studentName,
+    studentName: data.studentName || studentName || '',
+    phoneNumber: data.phoneNumber || normalizePhoneNumber(phoneNumber),
     loginTime: new Date().toISOString()
   };
   localStorage.setItem('dvClassroom_session', JSON.stringify(currentSession));
   
   closeLoginModal();
-  showSuccessToast(`Welcome ${studentName}!`);
+  showSuccessToast(`Welcome ${currentSession.studentName || lmsId}!`);
   
   // Show session selection
   setTimeout(() => {
@@ -739,7 +754,7 @@ function resetLoginForm() {
 /**
  * Validate login form
  */
-function validateLoginForm(lmsId, studentName) {
+function validateLoginForm(lmsId, studentName, phoneNumber) {
   let isValid = true;
   
   // Validate LMS ID
@@ -751,12 +766,18 @@ function validateLoginForm(lmsId, studentName) {
     isValid = false;
   }
   
-  // Validate student name
+  // Validate student name as display metadata only
   if (!studentName) {
-    showFormError('nameError', 'Student Name is required');
+    showFormError('nameError', 'Name is required');
     isValid = false;
-  } else if (studentName.length < 2) {
-    showFormError('nameError', 'Name must be at least 2 characters');
+  }
+
+  // Validate phone number
+  if (!phoneNumber) {
+    showFormError('phoneNumberError', 'Phone Number is required');
+    isValid = false;
+  } else if (!isValidPhoneNumber(phoneNumber)) {
+    showFormError('phoneNumberError', 'Enter a valid phone number with 10 to 15 digits');
     isValid = false;
   }
   

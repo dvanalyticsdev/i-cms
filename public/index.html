@@ -72,7 +72,7 @@
         <div class="modal-overlay" onclick="closeLoginModal()"></div>
         <div class="modal-container">
             <div class="modal-header">
-                <h2 class="modal-title">Class Login</h2>
+                <h2 class="modal-title">Student Login</h2>
                 <button class="modal-close" onclick="closeLoginModal()">×</button>
             </div>
             <div class="modal-body">
@@ -93,7 +93,7 @@
 
                     <!-- Student Name Input -->
                     <div class="form-group">
-                        <label for="studentName" class="form-label">Student Name *</label>
+                        <label for="studentName" class="form-label">Name *</label>
                         <input 
                             type="text" 
                             id="studentName" 
@@ -103,6 +103,21 @@
                             autocomplete="off"
                         >
                         <span class="form-error" id="nameError"></span>
+                    </div>
+
+                    <!-- Phone Number Input -->
+                    <div class="form-group">
+                        <label for="phoneNumber" class="form-label">Phone Number *</label>
+                        <input 
+                            type="tel" 
+                            id="phoneNumber" 
+                            class="form-input" 
+                            placeholder="e.g., +91 98765 43210"
+                            required
+                            inputmode="tel"
+                            autocomplete="off"
+                        >
+                        <span class="form-error" id="phoneNumberError"></span>
                     </div>
 
                     <!-- Remember Device Checkbox -->

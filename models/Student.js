@@ -14,6 +14,19 @@ const studentSchema = new mongoose.Schema(
       required: true,
       trim: true
     },
+    phoneNumber: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      index: true
+    },
+    batch: {
+      type: String,
+      default: '',
+      trim: true,
+      index: true
+    },
     course: {
       type: [String],
       default: []

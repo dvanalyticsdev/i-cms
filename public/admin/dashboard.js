@@ -15,6 +15,7 @@ let deleteTargetCourseId = null;
 let allStudents = [];
 let filteredStudents = [];
 let deleteTargetLmsId = null;
+let availableBatches = [];
 let allIssues = [];
 let deleteTargetIssueId = null;
 let allSessionLogs = [];
@@ -29,6 +30,17 @@ let sessionLogsQuery = {
 let sessionLogsSearchTimer = null;
 let currentExportFormat = 'json';
 let currentExportScope = 'all';
+let attendanceInsightsState = {
+    metrics: {},
+    trends: [],
+    batchComparison: [],
+    coursePerformance: [],
+    monthlySummaries: [],
+    atRiskStudents: [],
+    pagination: { page: 1, limit: 10, total: 0, totalPages: 1 },
+    filters: {}
+};
+let attendanceInsightsLoading = false;
 
 // ====================================
 // INITIALIZATION
@@ -46,12 +58,14 @@ document.addEventListener('DOMContentLoaded', () => {
     loadMockInterviewIds(); // Load mock interview IDs
     loadStudents(); // Load students
     loadIssues(); // Load issue reports
+    loadAttendanceInsights();
     setInterval(loadSessions, 30000); // Refresh sessions every 30 seconds
     setInterval(loadGuestIds, 30000); // Refresh guest IDs every 30 seconds
     setInterval(loadMentorIds, 30000); // Refresh mentor IDs every 30 seconds
     setInterval(loadMockInterviewIds, 30000); // Refresh mock interview IDs every 30 seconds
     setInterval(loadStudents, 30000); // Refresh students every 30 seconds
     setInterval(loadIssues, 30000); // Refresh issues every 30 seconds
+    setInterval(loadAttendanceInsights, 30000); // Refresh attendance insights every 30 seconds
 });
 
 /**
@@ -116,6 +130,7 @@ async function loadCourses() {
             renderCourseManagement();
             renderCoursesCheckboxes();
             populateStudentCourseFilter();
+            populateAttendanceFilterOptions();
         }
     } catch (error) {
         console.error('Error loading courses:', error);
@@ -271,6 +286,7 @@ async function loadSessions() {
         allSessions = data.sessions;
         renderSessions();
         updateStats();
+        populateAttendanceFilterOptions();
 
     } catch (error) {
         console.error('Error loading sessions:', error);
@@ -1514,6 +1530,7 @@ async function loadStudents() {
 
         allStudents = data.students || [];
         filteredStudents = [...allStudents];  // Initialize filtered list
+        availableBatches = Array.from(new Set(allStudents.map(student => student.batch).filter(Boolean))).sort();
         
         // Merge any legacy student course names into the shared course list
         const allCoursesSet = new Set(availableCourses);
@@ -1527,6 +1544,7 @@ async function loadStudents() {
         availableCourses = Array.from(allCoursesSet).sort();
         
         populateStudentCourseFilter();  // Populate course filter dropdown
+        populateAttendanceFilterOptions();
         renderStudents();
         updateStudentStats();
 
@@ -1667,7 +1685,7 @@ function renderStudents() {
         if (allStudents.length === 0) {
             studentsList.innerHTML = `
                 <tr>
-                    <td colspan="4" style="text-align: center; padding: 40px;">
+                        <td colspan="6" style="text-align: center; padding: 40px;">
                         <p style="color: #999;">No students found. <a href="#" onclick="openAddStudentModal(); return false;" style="color: #667eea;">Add one now</a></p>
                     </td>
                 </tr>
@@ -1675,7 +1693,7 @@ function renderStudents() {
         } else {
             studentsList.innerHTML = `
                 <tr>
-                    <td colspan="4" style="text-align: center; padding: 40px;">
+                        <td colspan="6" style="text-align: center; padding: 40px;">
                         <p style="color: #999;">No matching students found. Try adjusting your search or filters.</p>
                     </td>
                 </tr>
@@ -1687,6 +1705,8 @@ function renderStudents() {
     studentsList.innerHTML = filteredStudents.map(student => `
         <tr>
             <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(student.lmsId)}</code></td>
+            <td>${escapeHtml(student.phoneNumber || '-')}</td>
+            <td>${escapeHtml(student.batch || '-')}</td>
             <td>${escapeHtml(student.name)}</td>
             <td>${escapeHtml(student.course)}</td>
             <td>
@@ -1743,7 +1763,12 @@ function filterAndSearchStudents() {
         if (searchTerm) {
             const lmsIdMatch = student.lmsId.toLowerCase().includes(searchTerm);
             const nameMatch = student.name.toLowerCase().includes(searchTerm);
-            return lmsIdMatch || nameMatch;
+            const batchMatch = student.batch ? student.batch.toLowerCase().includes(searchTerm) : false;
+            const normalizedSearchTerm = searchTerm.replace(/\D/g, '');
+            const phoneMatch = normalizedSearchTerm && student.phoneNumber
+                ? String(student.phoneNumber).includes(normalizedSearchTerm)
+                : false;
+            return lmsIdMatch || nameMatch || batchMatch || phoneMatch;
         }
 
         return true;
@@ -1771,6 +1796,8 @@ function openAddStudentModal() {
     document.getElementById('studentEditMode').value = 'false';
     document.getElementById('studentOriginalLmsId').value = '';
     document.getElementById('studentLmsId').value = '';
+    document.getElementById('studentPhoneNumber').value = '';
+    document.getElementById('studentBatch').value = '';
     document.getElementById('studentName').value = '';
     document.getElementById('studentModalTitle').textContent = 'Add New Student';
     document.getElementById('studentSubmitText').textContent = 'Add Student';
@@ -1813,6 +1840,8 @@ function openEditStudentModal(lmsId) {
     document.getElementById('studentEditMode').value = 'true';
     document.getElementById('studentOriginalLmsId').value = lmsId;
     document.getElementById('studentLmsId').value = student.lmsId;
+    document.getElementById('studentPhoneNumber').value = student.phoneNumber || '';
+    document.getElementById('studentBatch').value = student.batch || '';
     document.getElementById('studentName').value = student.name;
     document.getElementById('studentModalTitle').textContent = 'Edit Student';
     document.getElementById('studentSubmitText').textContent = 'Save Changes';
@@ -1862,14 +1891,22 @@ async function handleSaveStudent(event) {
 
     const editMode = document.getElementById('studentEditMode').value === 'true';
     const lmsId = document.getElementById('studentLmsId').value.trim();
+    const phoneNumber = document.getElementById('studentPhoneNumber').value.trim();
+    const batch = document.getElementById('studentBatch').value.trim();
     const name = document.getElementById('studentName').value.trim();
     
     // Get selected courses from checkboxes
     const courseCheckboxes = document.querySelectorAll('.studentCourseCheckbox:checked');
     const courses = Array.from(courseCheckboxes).map(cb => cb.value);
 
-    if (!lmsId || !name || courses.length === 0) {
+    if (!lmsId || !phoneNumber || !batch || !name || courses.length === 0) {
         showToast('Please fill in all fields and select at least one course', 'error');
+        return;
+    }
+
+    const normalizedPhoneNumber = phoneNumber.replace(/\D/g, '');
+    if (normalizedPhoneNumber.length < 10 || normalizedPhoneNumber.length > 15) {
+        showToast('Enter a valid phone number with 10 to 15 digits', 'error');
         return;
     }
 
@@ -1883,7 +1920,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ name, courses })
+                body: JSON.stringify({ name, phoneNumber, batch, courses })
             });
         } else {
             // Add new student
@@ -1893,7 +1930,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ lmsId, name, courses })
+                body: JSON.stringify({ lmsId, name, phoneNumber, batch, courses })
             });
         }
 
@@ -1961,6 +1998,370 @@ async function confirmDeleteStudent() {
         console.error('Error deleting student:', error);
         showToast(error.message || 'Error deleting student', 'error');
     }
+}
+
+function populateAttendanceFilterOptions() {
+    const courseSelect = document.getElementById('attendanceCourseFilter');
+    const batchSelect = document.getElementById('attendanceBatchFilter');
+    const sessionSelect = document.getElementById('attendanceSessionFilter');
+
+    if (courseSelect) {
+        const currentValue = courseSelect.value;
+        courseSelect.innerHTML = '<option value="">All Courses</option>';
+        Array.from(new Set(availableCourses)).sort().forEach(course => {
+            const option = document.createElement('option');
+            option.value = course;
+            option.textContent = course;
+            courseSelect.appendChild(option);
+        });
+        courseSelect.value = currentValue;
+    }
+
+    if (batchSelect) {
+        const currentValue = batchSelect.value;
+        batchSelect.innerHTML = '<option value="">All Batches</option>';
+        Array.from(new Set(availableBatches)).sort().forEach(batch => {
+            const option = document.createElement('option');
+            option.value = batch;
+            option.textContent = batch;
+            batchSelect.appendChild(option);
+        });
+        batchSelect.value = currentValue;
+    }
+
+    if (sessionSelect) {
+        const currentValue = sessionSelect.value;
+        sessionSelect.innerHTML = '<option value="">All Sessions</option>';
+        allSessions.forEach(session => {
+            const option = document.createElement('option');
+            option.value = session.sessionId;
+            option.textContent = session.title;
+            sessionSelect.appendChild(option);
+        });
+        sessionSelect.value = currentValue;
+    }
+}
+
+function collectAttendanceFilters() {
+    return {
+        timeframe: document.getElementById('attendanceTimeframe')?.value || 'monthly',
+        from: document.getElementById('attendanceFromDate')?.value || '',
+        to: document.getElementById('attendanceToDate')?.value || '',
+        course: document.getElementById('attendanceCourseFilter')?.value || '',
+        batch: document.getElementById('attendanceBatchFilter')?.value || '',
+        trainer: document.getElementById('attendanceTrainerFilter')?.value.trim() || '',
+        sessionId: document.getElementById('attendanceSessionFilter')?.value || '',
+        threshold: document.getElementById('attendanceThreshold')?.value || '75',
+        search: document.getElementById('attendanceSearch')?.value.trim() || ''
+    };
+}
+
+function applyAttendanceFilters() {
+    const timeframe = document.getElementById('attendanceTimeframe')?.value || 'monthly';
+    const fromDate = document.getElementById('attendanceFromDate');
+    const toDate = document.getElementById('attendanceToDate');
+    if (fromDate) fromDate.disabled = timeframe !== 'custom';
+    if (toDate) toDate.disabled = timeframe !== 'custom';
+    loadAttendanceInsights(1);
+}
+
+function resetAttendanceFilters() {
+    const timeframe = document.getElementById('attendanceTimeframe');
+    const fromDate = document.getElementById('attendanceFromDate');
+    const toDate = document.getElementById('attendanceToDate');
+    const course = document.getElementById('attendanceCourseFilter');
+    const batch = document.getElementById('attendanceBatchFilter');
+    const trainer = document.getElementById('attendanceTrainerFilter');
+    const session = document.getElementById('attendanceSessionFilter');
+    const threshold = document.getElementById('attendanceThreshold');
+    const search = document.getElementById('attendanceSearch');
+
+    if (timeframe) timeframe.value = 'monthly';
+    if (fromDate) { fromDate.value = ''; fromDate.disabled = true; }
+    if (toDate) { toDate.value = ''; toDate.disabled = true; }
+    if (course) course.value = '';
+    if (batch) batch.value = '';
+    if (trainer) trainer.value = '';
+    if (session) session.value = '';
+    if (threshold) threshold.value = '75';
+    if (search) search.value = '';
+
+    loadAttendanceInsights(1);
+}
+
+function openAttendanceExportModal() {
+    document.getElementById('attendanceExportModal').classList.remove('hidden');
+}
+
+function closeAttendanceExportModal() {
+    document.getElementById('attendanceExportModal').classList.add('hidden');
+}
+
+async function confirmAttendanceExport() {
+    const reportType = document.getElementById('attendanceExportType').value;
+    const format = document.getElementById('attendanceExportFormat').value;
+    closeAttendanceExportModal();
+    await exportAttendanceReport(reportType, format);
+}
+
+async function exportAttendanceReport(reportType, format) {
+    try {
+        showToast('Preparing attendance report...', 'info');
+        const filters = collectAttendanceFilters();
+        const params = new URLSearchParams({
+            format,
+            reportType,
+            timeframe: reportType,
+            course: filters.course,
+            batch: filters.batch,
+            trainer: filters.trainer,
+            sessionId: filters.sessionId,
+            threshold: filters.threshold,
+            search: filters.search,
+            from: filters.from,
+            to: filters.to
+        });
+
+        const response = await fetch(`${API_BASE_URL}/attendance/report?${params.toString()}`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.message || 'Failed to export attendance report');
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `attendance-report-${reportType}.${format === 'excel' ? 'xlsx' : format}`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        showToast('Attendance report downloaded successfully', 'success');
+    } catch (error) {
+        console.error('Error exporting attendance report:', error);
+        showToast(error.message || 'Error exporting attendance report', 'error');
+    }
+}
+
+async function loadAttendanceInsights(page = 1) {
+    if (attendanceInsightsLoading) {
+        return;
+    }
+
+    attendanceInsightsLoading = true;
+    const riskMeta = document.getElementById('attendanceRiskMeta');
+    if (riskMeta) {
+        riskMeta.textContent = 'Loading attendance insights...';
+    }
+
+    try {
+        populateAttendanceFilterOptions();
+        const filters = collectAttendanceFilters();
+        const params = new URLSearchParams({
+            page: String(page),
+            limit: '10',
+            timeframe: filters.timeframe,
+            from: filters.from,
+            to: filters.to,
+            course: filters.course,
+            batch: filters.batch,
+            trainer: filters.trainer,
+            sessionId: filters.sessionId,
+            threshold: filters.threshold,
+            search: filters.search
+        });
+
+        const response = await fetch(`${API_BASE_URL}/attendance/insights?${params.toString()}`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.message || 'Failed to load attendance insights');
+        }
+
+        attendanceInsightsState = {
+            metrics: data.metrics || {},
+            trends: data.trends || [],
+            batchComparison: data.batchComparison || [],
+            coursePerformance: data.coursePerformance || [],
+            monthlySummaries: data.monthlySummaries || [],
+            atRiskStudents: data.atRiskStudents || [],
+            pagination: data.pagination || { page: 1, limit: 10, total: 0, totalPages: 1 },
+            filters: data.filters || {}
+        };
+
+        renderAttendanceInsights();
+    } catch (error) {
+        console.error('Error loading attendance insights:', error);
+        if (riskMeta) {
+            riskMeta.textContent = 'Unable to load attendance insights right now.';
+        }
+        const riskList = document.getElementById('attendanceRiskList');
+        if (riskList) {
+            riskList.innerHTML = `
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load attendance insights')}</td>
+                </tr>
+            `;
+        }
+    } finally {
+        attendanceInsightsLoading = false;
+    }
+}
+
+function renderAttendanceInsights() {
+    const metrics = attendanceInsightsState.metrics || {};
+    document.getElementById('attendanceTotalStudents').textContent = metrics.totalStudents ?? 0;
+    document.getElementById('attendancePresentToday').textContent = metrics.presentToday ?? 0;
+    document.getElementById('attendanceAbsentToday').textContent = metrics.absentToday ?? 0;
+    document.getElementById('attendanceOverallPercentage').textContent = `${metrics.overallAttendancePercentage ?? 0}%`;
+    document.getElementById('attendanceAtRisk').textContent = metrics.studentsAtRisk ?? 0;
+    document.getElementById('attendanceTotalSessions').textContent = metrics.totalSessionsConducted ?? 0;
+
+    renderAttendanceChart('attendanceTrendChart', attendanceInsightsState.trends, {
+        labelKey: 'date',
+        valueKey: 'present',
+        titleKey: 'date',
+        emptyText: 'No attendance trend data available.'
+    });
+    renderAttendanceChart('attendanceBatchChart', attendanceInsightsState.batchComparison, {
+        labelKey: 'batch',
+        valueKey: 'attendancePercentage',
+        suffix: '%',
+        emptyText: 'No batch comparison data available.'
+    });
+    renderAttendanceChart('attendanceCourseChart', attendanceInsightsState.coursePerformance, {
+        labelKey: 'course',
+        valueKey: 'attendancePercentage',
+        suffix: '%',
+        emptyText: 'No course performance data available.'
+    });
+    renderAttendanceChart('attendanceMonthlyChart', attendanceInsightsState.monthlySummaries, {
+        labelKey: 'month',
+        valueKey: 'present',
+        emptyText: 'No monthly summary available.'
+    });
+    renderAttendanceRiskTable();
+    renderAttendancePagination();
+
+    const riskMeta = document.getElementById('attendanceRiskMeta');
+    if (riskMeta) {
+        const pagination = attendanceInsightsState.pagination || {};
+        riskMeta.textContent = `${pagination.total || 0} at-risk student(s) matching the current filters`;
+    }
+}
+
+function renderAttendanceChart(containerId, items, options) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (!items || items.length === 0) {
+        container.innerHTML = `<div class="chart-empty-state">${escapeHtml(options.emptyText || 'No data available')}</div>`;
+        return;
+    }
+
+    const valueKey = options.valueKey;
+    const labelKey = options.labelKey;
+    const suffix = options.suffix || '';
+    const maxValue = Math.max(...items.map(item => Number(item[valueKey]) || 0), 1);
+
+    container.innerHTML = `
+        <div class="chart-bars">
+            ${items.slice(0, 10).map(item => {
+                const value = Number(item[valueKey]) || 0;
+                const height = Math.max((value / maxValue) * 100, 6);
+                const label = String(item[labelKey] || 'N/A');
+                const title = `${label}: ${value}${suffix}`;
+                return `
+                    <div class="chart-bar-item" title="${escapeHtml(title)}">
+                        <div class="chart-bar-track">
+                            <div class="chart-bar-fill" style="height: ${height}%;"></div>
+                        </div>
+                        <div class="chart-bar-value">${escapeHtml(String(value))}${escapeHtml(suffix)}</div>
+                        <div class="chart-bar-label">${escapeHtml(label)}</div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+function renderAttendanceRiskTable() {
+    const riskList = document.getElementById('attendanceRiskList');
+    if (!riskList) return;
+
+    const records = attendanceInsightsState.atRiskStudents || [];
+    if (records.length === 0) {
+        riskList.innerHTML = `
+            <tr>
+                <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No at-risk students found for the selected filters.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    riskList.innerHTML = records.map(student => `
+        <tr>
+            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(student.lmsId)}</code></td>
+            <td>${escapeHtml(student.name)}</td>
+            <td>${escapeHtml(student.course)}</td>
+            <td>${escapeHtml(student.batch)}</td>
+            <td><strong>${escapeHtml(String(student.attendancePercentage ?? 0))}%</strong></td>
+            <td>${student.lastAttendanceDate ? escapeHtml(student.lastAttendanceDate) : '-'}</td>
+            <td>
+                <div class="risk-reason-list">
+                    ${(student.riskReasons || []).map(reason => `<span class="risk-pill">${escapeHtml(reason)}</span>`).join('')}
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderAttendancePagination() {
+    const pagination = attendanceInsightsState.pagination || { page: 1, totalPages: 1 };
+    const container = document.getElementById('attendanceRiskPagination');
+    if (!container) return;
+
+    const totalPages = Math.max(pagination.totalPages || 1, 1);
+    const currentPage = Math.max(pagination.page || 1, 1);
+
+    if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const buttons = [];
+    buttons.push(`<button class="pagination-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="loadAttendanceInsights(${currentPage - 1})">Prev</button>`);
+
+    for (let page = 1; page <= totalPages; page++) {
+        if (page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1) {
+            buttons.push(`<button class="pagination-btn ${page === currentPage ? 'active' : ''}" onclick="loadAttendanceInsights(${page})">${page}</button>`);
+        } else if (page === currentPage - 2 || page === currentPage + 2) {
+            buttons.push('<span style="padding: 8px 4px; color: #999;">...</span>');
+        }
+    }
+
+    buttons.push(`<button class="pagination-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="loadAttendanceInsights(${currentPage + 1})">Next</button>`);
+    container.innerHTML = buttons.join('');
 }
 
 // ====================================

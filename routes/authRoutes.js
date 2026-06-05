@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const ActiveSession = require('../models/ActiveSession');
 const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
+const { logSessionActivity } = require('../utils/sessionLogger');
+const { sanitizeLmsId, normalizePhoneNumber, isValidPhoneNumber } = require('../utils/studentValidation');
 
 const normalize = (str) => str.trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -13,17 +15,17 @@ const normalize = (str) => str.trim().replace(/\s+/g, ' ').toLowerCase();
  */
 router.post('/verify-student', async (req, res) => {
   try {
-    const { lmsId, name, deviceToken, forceLogin } = req.body;
+    const { lmsId, phoneNumber, name, deviceToken, forceLogin } = req.body;
 
-    if (!lmsId || !name || !deviceToken) {
+    if (!lmsId || !deviceToken) {
       return res.status(400).json({
         success: false,
-        message: 'ID, Student Name, and Device Token are required'
+        message: 'LMS ID and Device Token are required'
       });
     }
 
-    const sanitizedLmsId = lmsId.trim();
-    const sanitizedName = name.trim();
+    const sanitizedLmsId = sanitizeLmsId(lmsId);
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
 
     const isGuestMentorId = sanitizedLmsId.startsWith('GUEST_') || sanitizedLmsId.startsWith('MENTOR_') || sanitizedLmsId.startsWith('MOCK_INTERVIEW_');
     
@@ -32,6 +34,14 @@ router.post('/verify-student', async (req, res) => {
     let userType = 'student';
 
     if (isGuestMentorId) {
+      if (!name) {
+        return res.status(400).json({
+          success: false,
+          message: 'Student Name is required for guest and mentor IDs'
+        });
+      }
+
+      const sanitizedName = name.trim();
       userInfo = await GuestMentorId.findOne({ id: sanitizedLmsId, status: 'Active' }).lean();
       if (userInfo && normalize(userInfo.assignedName) === normalize(sanitizedName)) {
         isValid = true;
@@ -44,16 +54,40 @@ router.post('/verify-student', async (req, res) => {
         userType = 'mock-interview';
       }
     } else {
-      userInfo = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
-      if (userInfo && normalize(userInfo.name) === normalize(sanitizedName)) {
+      if (!phoneNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'Phone Number is required'
+        });
+      }
+
+      if (!isValidPhoneNumber(normalizedPhoneNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Enter a valid phone number with 10 to 15 digits'
+        });
+      }
+
+      userInfo = await Student.findOne({ lmsId: sanitizedLmsId, phoneNumber: normalizedPhoneNumber }).lean();
+      if (userInfo) {
         isValid = true;
       }
     }
 
     if (!isValid) {
+      if (!isGuestMentorId) {
+        await logSessionActivity({
+          sessionName: 'Student Login',
+          userName: sanitizedLmsId,
+          actionPerformed: 'Verify Login Attempt',
+          status: 'Failed',
+          remarks: 'Invalid LMS ID and phone number combination'
+        });
+      }
+
       return res.status(401).json({
         success: false,
-        message: 'Invalid ID or Name'
+        message: isGuestMentorId ? 'Invalid ID or Name' : 'Invalid LMS ID or Phone Number'
       });
     }
 
@@ -80,20 +114,32 @@ router.post('/verify-student', async (req, res) => {
     const newActiveSession = new ActiveSession({
       sessionToken,
       lmsId: sanitizedLmsId,
-      name: sanitizedName,
+      name: userInfo?.name || (name ? name.trim() : sanitizedLmsId),
+      phoneNumber: userInfo?.phoneNumber || (normalizedPhoneNumber || null),
       deviceToken,
       status: 'active'
     });
     
     await newActiveSession.save();
 
+    if (!isGuestMentorId) {
+      await logSessionActivity({
+        sessionName: 'Student Login',
+        userName: sanitizedLmsId,
+        actionPerformed: 'Verified Login',
+        status: 'Success',
+        remarks: 'LMS ID and phone number validated successfully'
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'User verified successfully',
       sessionToken: sessionToken,
-      studentName: sanitizedName,
+      studentName: userInfo?.name || name?.trim() || sanitizedLmsId,
       lmsId: sanitizedLmsId,
       userType: userType,
+      phoneNumber: userInfo?.phoneNumber || normalizedPhoneNumber || undefined,
       course: isGuestMentorId && userInfo ? userInfo.course : undefined,
       zoom: null
     });
@@ -113,29 +159,51 @@ router.post('/verify-student', async (req, res) => {
  */
 router.post('/force-logout', async (req, res) => {
   try {
-    const { lmsId, name, deviceToken } = req.body;
+    const { lmsId, phoneNumber, name, deviceToken } = req.body;
 
-    if (!lmsId || !name || !deviceToken) {
+    if (!lmsId || !deviceToken) {
       return res.status(400).json({
         success: false,
-        message: 'LMS ID, Student Name, and Device Token are required'
+        message: 'LMS ID and Device Token are required'
       });
     }
 
-    const sanitizedLmsId = lmsId.trim();
-    const sanitizedName = name.trim();
+    const sanitizedLmsId = sanitizeLmsId(lmsId);
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
 
     const isGuestMentorId = sanitizedLmsId.startsWith('GUEST_') || sanitizedLmsId.startsWith('MENTOR_') || sanitizedLmsId.startsWith('MOCK_INTERVIEW_');
     let isValid = false;
 
     if (isGuestMentorId) {
+      if (!name) {
+        return res.status(400).json({
+          success: false,
+          message: 'Student Name is required for guest and mentor IDs'
+        });
+      }
+
+      const sanitizedName = name.trim();
       const userInfo = await GuestMentorId.findOne({ id: sanitizedLmsId, status: 'Active' }).lean();
       if (userInfo && normalize(userInfo.assignedName) === normalize(sanitizedName)) {
         isValid = true;
       }
     } else {
-      const userInfo = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
-      if (userInfo && normalize(userInfo.name) === normalize(sanitizedName)) {
+      if (!phoneNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'Phone Number is required'
+        });
+      }
+
+      if (!isValidPhoneNumber(normalizedPhoneNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Enter a valid phone number with 10 to 15 digits'
+        });
+      }
+
+      const userInfo = await Student.findOne({ lmsId: sanitizedLmsId, phoneNumber: normalizedPhoneNumber }).lean();
+      if (userInfo) {
         isValid = true;
       }
     }
@@ -143,7 +211,7 @@ router.post('/force-logout', async (req, res) => {
     if (!isValid) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid LMS ID or Student Name'
+        message: isGuestMentorId ? 'Invalid LMS ID or Student Name' : 'Invalid LMS ID or Phone Number'
       });
     }
 

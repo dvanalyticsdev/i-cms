@@ -45,6 +45,9 @@
             <a href="#session-logs" class="nav-item" data-tab="session-logs">
                 <span class="nav-text">Session Logs</span>
             </a>
+            <a href="#attendance-insights" class="nav-item" data-tab="attendance-insights">
+                <span class="nav-text">Attendance Insights</span>
+            </a>
             <a href="#id-management" class="nav-item" data-tab="id-management">
                 <span class="nav-text">ID Management</span>
             </a>
@@ -418,7 +421,7 @@
                         type="text"
                         id="studentSearch"
                         class="form-input"
-                        placeholder="Search by LMS ID or Name..."
+                        placeholder="Search by LMS ID, Name, or Phone..."
                         style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"
                         onkeyup="filterAndSearchStudents()"
                     >
@@ -444,6 +447,8 @@
                     <thead>
                         <tr>
                             <th>LMS ID</th>
+                            <th>Phone Number</th>
+                            <th>Batch</th>
                             <th>Name</th>
                             <th>Course</th>
                             <th>Actions</th>
@@ -451,13 +456,152 @@
                     </thead>
                     <tbody id="studentsList">
                         <tr class="loading-row">
-                            <td colspan="4" style="text-align: center; padding: 40px;">
+                            <td colspan="6" style="text-align: center; padding: 40px;">
                                 <div class="spinner"></div>
                                 <p>Loading students...</p>
                             </td>
                         </tr>
                     </tbody>
                 </table>
+            </div>
+        </section>
+
+        <!-- Attendance Insights Tab -->
+        <section id="attendance-insights-tab" class="tab-content">
+            <div class="section-header">
+                <div>
+                    <h2 class="section-title">Attendance Insights</h2>
+                    <p class="section-subtitle">Real-time visibility into attendance performance across courses, batches, and sessions</p>
+                </div>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" onclick="openAttendanceExportModal()">Export Attendance Report</button>
+                    <button class="btn btn-primary" onclick="loadAttendanceInsights()">Refresh Insights</button>
+                </div>
+            </div>
+
+            <div class="attendance-toolbar table-toolbar-wrap">
+                <select id="attendanceTimeframe" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly" selected>Monthly</option>
+                    <option value="custom">Custom Date Range</option>
+                    <option value="complete">Complete</option>
+                </select>
+                <input type="date" id="attendanceFromDate" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
+                <input type="date" id="attendanceToDate" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
+                <select id="attendanceCourseFilter" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
+                    <option value="">All Courses</option>
+                </select>
+                <select id="attendanceBatchFilter" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
+                    <option value="">All Batches</option>
+                </select>
+                <input type="text" id="attendanceTrainerFilter" class="form-input table-toolbar-search" placeholder="Filter by trainer" oninput="applyAttendanceFilters()">
+                <select id="attendanceSessionFilter" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
+                    <option value="">All Sessions</option>
+                </select>
+                <input type="number" id="attendanceThreshold" class="form-input table-toolbar-select" min="1" max="100" value="75" oninput="applyAttendanceFilters()">
+                <input type="text" id="attendanceSearch" class="form-input table-toolbar-search" placeholder="Search at-risk students..." oninput="applyAttendanceFilters()">
+                <button class="btn btn-secondary" onclick="resetAttendanceFilters()">Reset</button>
+            </div>
+
+            <div class="stats-grid attendance-stats-grid">
+                <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendanceTotalStudents">0</div><div class="stat-label">Total Students</div></div>
+                <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendancePresentToday">0</div><div class="stat-label">Present Today</div></div>
+                <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendanceAbsentToday">0</div><div class="stat-label">Absent Today</div></div>
+                <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendanceOverallPercentage">0%</div><div class="stat-label">Overall Attendance %</div></div>
+                <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendanceAtRisk">0</div><div class="stat-label">Students at Risk</div></div>
+                <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendanceTotalSessions">0</div><div class="stat-label">Total Sessions Conducted</div></div>
+            </div>
+
+            <div class="attendance-chart-grid">
+                <div class="attendance-chart-card">
+                    <div class="section-header attendance-card-header">
+                        <div>
+                            <h3 class="section-title">Attendance Trends</h3>
+                            <p class="section-subtitle">Daily attendance movement over time</p>
+                        </div>
+                    </div>
+                    <div id="attendanceTrendChart" class="chart-placeholder"></div>
+                </div>
+                <div class="attendance-chart-card">
+                    <div class="section-header attendance-card-header">
+                        <div>
+                            <h3 class="section-title">Batch Comparison</h3>
+                            <p class="section-subtitle">Compare attendance across batches</p>
+                        </div>
+                    </div>
+                    <div id="attendanceBatchChart" class="chart-placeholder"></div>
+                </div>
+                <div class="attendance-chart-card">
+                    <div class="section-header attendance-card-header">
+                        <div>
+                            <h3 class="section-title">Course Performance</h3>
+                            <p class="section-subtitle">Attendance performance by course</p>
+                        </div>
+                    </div>
+                    <div id="attendanceCourseChart" class="chart-placeholder"></div>
+                </div>
+                <div class="attendance-chart-card">
+                    <div class="section-header attendance-card-header">
+                        <div>
+                            <h3 class="section-title">Monthly Summary</h3>
+                            <p class="section-subtitle">Monthly present counts and session coverage</p>
+                        </div>
+                    </div>
+                    <div id="attendanceMonthlyChart" class="chart-placeholder"></div>
+                </div>
+            </div>
+
+            <div class="attendance-panels">
+                <div class="risk-panel">
+                    <div class="section-header attendance-card-header">
+                        <div>
+                            <h3 class="section-title">At-Risk Students</h3>
+                            <p class="section-subtitle">Students below the configured threshold or showing repeated absences</p>
+                        </div>
+                    </div>
+                    <div class="table-meta" id="attendanceRiskMeta">Loading at-risk students...</div>
+                    <div class="table-container">
+                        <table class="table" id="attendanceRiskTable">
+                            <thead>
+                                <tr>
+                                    <th>LMS ID</th>
+                                    <th>Name</th>
+                                    <th>Course</th>
+                                    <th>Batch</th>
+                                    <th>Attendance %</th>
+                                    <th>Last Attendance</th>
+                                    <th>Risk</th>
+                                </tr>
+                            </thead>
+                            <tbody id="attendanceRiskList">
+                                <tr class="loading-row">
+                                    <td colspan="7" style="text-align: center; padding: 40px;">
+                                        <div class="spinner"></div>
+                                        <p>Loading attendance insights...</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="pagination" id="attendanceRiskPagination"></div>
+                </div>
+
+                <div class="export-panel">
+                    <div class="section-header attendance-card-header">
+                        <div>
+                            <h3 class="section-title">Export Attendance Report</h3>
+                            <p class="section-subtitle">Generate daily, weekly, monthly, custom, or complete reports</p>
+                        </div>
+                    </div>
+                    <div class="export-grid">
+                        <button class="btn btn-secondary" onclick="exportAttendanceReport('daily', 'excel')">Daily Excel</button>
+                        <button class="btn btn-secondary" onclick="exportAttendanceReport('weekly', 'csv')">Weekly CSV</button>
+                        <button class="btn btn-secondary" onclick="exportAttendanceReport('monthly', 'excel')">Monthly Excel</button>
+                        <button class="btn btn-secondary" onclick="exportAttendanceReport('complete', 'pdf')">Complete PDF</button>
+                    </div>
+                    <p class="table-meta">Exports include student-wise attendance, session summaries, batch and course performance, defaulter lists, and attendance trends.</p>
+                </div>
             </div>
         </section>
 
@@ -788,6 +932,29 @@
                     </div>
 
                     <div class="form-group">
+                        <label class="form-label">Phone Number *</label>
+                        <input
+                            type="tel"
+                            id="studentPhoneNumber"
+                            class="form-input"
+                            placeholder="e.g., +91 98765 43210"
+                            required
+                            inputmode="tel"
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Batch *</label>
+                        <input
+                            type="text"
+                            id="studentBatch"
+                            class="form-input"
+                            placeholder="e.g., Batch A"
+                            required
+                        >
+                    </div>
+
+                    <div class="form-group">
                         <label class="form-label">Name *</label>
                         <input
                             type="text"
@@ -843,6 +1010,41 @@
                 <div style="display: flex; gap: 10px; justify-content: flex-end;">
                     <button class="btn btn-secondary" onclick="closeDeleteIssueModal()">Cancel</button>
                     <button class="btn btn-danger" onclick="confirmDeleteIssue()" style="background: #dc3545;">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attendance Export Modal -->
+    <div id="attendanceExportModal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeAttendanceExportModal()"></div>
+        <div class="modal-container" style="max-width: 460px;">
+            <div class="modal-header">
+                <h3 class="modal-title">Export Attendance Report</h3>
+                <button class="modal-close" onclick="closeAttendanceExportModal()">Close</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Report Type</label>
+                    <select id="attendanceExportType" class="form-input">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly" selected>Monthly</option>
+                        <option value="custom">Custom Date Range</option>
+                        <option value="complete">Complete</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Format</label>
+                    <select id="attendanceExportFormat" class="form-input">
+                        <option value="excel">Excel</option>
+                        <option value="csv">CSV</option>
+                        <option value="pdf">PDF</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeAttendanceExportModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="confirmAttendanceExport()">Download</button>
                 </div>
             </div>
         </div>
