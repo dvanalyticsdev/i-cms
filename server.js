@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const { ensureMongoConnection, isMongoConnected } = require('./utils/mongoConnection');
+const { autoFinalizeStaleSessions } = require('./utils/attendanceTracker');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -38,6 +39,25 @@ const initializeDatabase = async () => {
     }
 
     console.log('✓ MongoDB connected successfully');
+
+    // Attempt to drop the old unique index on attendance_records if it exists
+    try {
+      await mongoose.connection.collection('attendance_records').dropIndex('lmsId_1_sessionId_1');
+      console.log('✓ Dropped old index lmsId_1_sessionId_1 successfully');
+    } catch (err) {
+      // index not found or couldn't be dropped, which is fine
+    }
+
+    // Start background finalizer to run every 1 minute
+    setInterval(async () => {
+      try {
+        if (mongoose.connection.readyState === 1) {
+          await autoFinalizeStaleSessions();
+        }
+      } catch (error) {
+        console.error('Error in stale session auto-finalizer interval:', error.message);
+      }
+    }, 60000);
     
   } catch (error) {
     console.error('✗ MongoDB connection failed:', error.message);

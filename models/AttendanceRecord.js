@@ -107,7 +107,7 @@ const attendanceRecordSchema = new mongoose.Schema(
   }
 );
 
-attendanceRecordSchema.index({ lmsId: 1, sessionId: 1 }, { unique: true });
+attendanceRecordSchema.index({ lmsId: 1, sessionId: 1, attendanceDate: 1 }, { unique: true });
 attendanceRecordSchema.index({ attendanceDate: 1, course: 1, batch: 1, sessionId: 1 });
 attendanceRecordSchema.index({ trainerName: 1, sessionId: 1 });
 

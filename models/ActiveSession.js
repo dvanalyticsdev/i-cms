@@ -65,6 +65,11 @@ const activeSessionSchema = new mongoose.Schema(
       type: Date,
       default: null,
       index: true
+    },
+    lastSeenAt: {
+      type: Date,
+      default: Date.now,
+      index: true
     }
   },
   {

@@ -1,4 +1,5 @@
 const AttendanceRecord = require('../models/AttendanceRecord');
+const ActiveSession = require('../models/ActiveSession');
 
 function roundMinutes(ms) {
   return Math.round((Math.max(ms, 0) / 60000) * 10) / 10;
@@ -21,7 +22,8 @@ async function recordSessionJoin({
     return null;
   }
 
-  const existingRecord = await AttendanceRecord.findOne({ lmsId, sessionId });
+  // Find record for this specific day to support daily attendance records
+  const existingRecord = await AttendanceRecord.findOne({ lmsId, sessionId, attendanceDate });
 
   if (!existingRecord) {
     const record = new AttendanceRecord({
@@ -80,10 +82,22 @@ async function finalizeAttendanceForActiveSession(activeSession, endedAt = new D
     return null;
   }
 
-  const record = await AttendanceRecord.findOne({
+  // Look for the record where currentJoinStartedAt is active (not null)
+  let record = await AttendanceRecord.findOne({
     lmsId: activeSession.lmsId,
-    sessionId: activeSession.classSessionId
+    sessionId: activeSession.classSessionId,
+    currentJoinStartedAt: { $ne: null }
   });
+
+  // Fallback: lookup by date of the session's join timestamp
+  if (!record) {
+    const attendanceDate = new Date(activeSession.joinedAt || endedAt).toLocaleDateString('en-CA');
+    record = await AttendanceRecord.findOne({
+      lmsId: activeSession.lmsId,
+      sessionId: activeSession.classSessionId,
+      attendanceDate
+    });
+  }
 
   if (!record) {
     return null;
@@ -102,8 +116,38 @@ async function finalizeAttendanceForActiveSession(activeSession, endedAt = new D
   return record.toObject();
 }
 
+async function autoFinalizeStaleSessions(timeoutMs = 120000) { // Default 2 minutes
+  const cutoffTime = new Date(Date.now() - timeoutMs);
+
+  try {
+    // Find all active sessions that haven't sent a heartbeat recently
+    const staleSessions = await ActiveSession.find({
+      status: 'active',
+      lastSeenAt: { $lt: cutoffTime }
+    });
+
+    for (const session of staleSessions) {
+      try {
+        const endedAt = session.lastSeenAt || session.joinedAt || new Date();
+        await finalizeAttendanceForActiveSession(session, endedAt);
+        
+        session.status = 'ended';
+        session.endedAt = endedAt;
+        await session.save();
+        
+        console.log(`[Auto-Finalizer] Finalized stale session for LMS ID: ${session.lmsId}`);
+      } catch (err) {
+        console.error(`[Auto-Finalizer] Error finalizing stale session for ${session.lmsId}:`, err.message);
+      }
+    }
+  } catch (error) {
+    console.error('[Auto-Finalizer] Error fetching stale sessions:', error.message);
+  }
+}
+
 module.exports = {
   finalizeAttendanceForActiveSession,
   recordSessionJoin,
-  roundMinutes
+  roundMinutes,
+  autoFinalizeStaleSessions
 };

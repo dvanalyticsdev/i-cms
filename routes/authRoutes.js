@@ -4,11 +4,10 @@ const crypto = require('crypto');
 const ActiveSession = require('../models/ActiveSession');
 const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
+const AttendanceRecord = require('../models/AttendanceRecord');
 const { logSessionActivity } = require('../utils/sessionLogger');
 const { sanitizeLmsId, normalizePhoneNumber, isValidPhoneNumber } = require('../utils/studentValidation');
 const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
-
-const normalize = (str) => str.trim().replace(/\s+/g, ' ').toLowerCase();
 
 /**
  * POST /api/verify-student
@@ -106,9 +105,10 @@ router.post('/verify-student', async (req, res) => {
         });
       }
       
-      await finalizeAttendanceForActiveSession(existingSession, new Date());
+      const endedAt = existingSession.lastSeenAt || existingSession.joinedAt || new Date();
+      await finalizeAttendanceForActiveSession(existingSession, endedAt);
       existingSession.status = 'ended';
-      existingSession.endedAt = new Date();
+      existingSession.endedAt = endedAt;
       await existingSession.save();
     }
 
@@ -220,9 +220,10 @@ router.post('/force-logout', async (req, res) => {
 
     const activeSession = await ActiveSession.findOne({ lmsId: sanitizedLmsId, status: 'active' });
     if (activeSession) {
-      await finalizeAttendanceForActiveSession(activeSession, new Date());
+      const endedAt = activeSession.lastSeenAt || activeSession.joinedAt || new Date();
+      await finalizeAttendanceForActiveSession(activeSession, endedAt);
       activeSession.status = 'ended';
-      activeSession.endedAt = new Date();
+      activeSession.endedAt = endedAt;
       await activeSession.save();
     }
 
@@ -263,13 +264,25 @@ router.post('/logout', async (req, res) => {
       });
     }
 
-    await finalizeAttendanceForActiveSession(activeSession, new Date());
+    const endedAt = activeSession.lastSeenAt || activeSession.joinedAt || new Date();
+    await finalizeAttendanceForActiveSession(activeSession, endedAt);
     activeSession.status = 'ended';
-    activeSession.endedAt = new Date();
+    activeSession.endedAt = endedAt;
     await activeSession.save();
 
     return res.status(200).json({
       success: true,
+      message: 'Logged out successfully'
+    });
+
+  } catch (error) {
+    console.error('Error in logout:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error occurred',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
       message: 'Logged out successfully'
     });
 
@@ -294,10 +307,12 @@ router.get('/session/:lmsId', async (req, res) => {
     if (!lmsId) return res.status(400).json({ success: false, message: 'LMS ID is required' });
     if (!deviceToken) return res.status(400).json({ success: false, message: 'Device token is required' });
 
-    const sessionData = await ActiveSession.findOne({
-      lmsId: lmsId.trim(),
-      status: 'active'
-    }).lean();
+    const now = new Date();
+    const sessionData = await ActiveSession.findOneAndUpdate(
+      { lmsId: lmsId.trim(), status: 'active' },
+      { $set: { lastSeenAt: now } },
+      { new: true }
+    ).lean();
 
     if (!sessionData) {
       return res.status(404).json({
@@ -311,6 +326,21 @@ router.get('/session/:lmsId', async (req, res) => {
         success: false,
         message: 'Session belongs to a different device'
       });
+    }
+
+    if (sessionData.classSessionId) {
+      try {
+        await AttendanceRecord.updateOne(
+          {
+            lmsId: sessionData.lmsId,
+            sessionId: sessionData.classSessionId,
+            currentJoinStartedAt: { $ne: null }
+          },
+          { $set: { lastSeenAt: now } }
+        );
+      } catch (err) {
+        console.warn('Failed to update AttendanceRecord lastSeenAt on heartbeat:', err.message);
+      }
     }
 
     return res.status(200).json({
