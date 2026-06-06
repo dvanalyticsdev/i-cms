@@ -9,6 +9,10 @@ const { logSessionActivity } = require('../utils/sessionLogger');
 const { sanitizeLmsId, normalizePhoneNumber, isValidPhoneNumber } = require('../utils/studentValidation');
 const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
 
+function normalize(value) {
+  return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 /**
  * POST /api/verify-student
  * Verify student credentials (LMS ID or Guest/Mentor ID) and create session
@@ -272,17 +276,6 @@ router.post('/logout', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Logged out successfully'
-    });
-
-  } catch (error) {
-    console.error('Error in logout:', error.message);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error occurred',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
       message: 'Logged out successfully'
     });
 
