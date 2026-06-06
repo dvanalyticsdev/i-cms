@@ -6,6 +6,7 @@ const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
 const { logSessionActivity } = require('../utils/sessionLogger');
 const { sanitizeLmsId, normalizePhoneNumber, isValidPhoneNumber } = require('../utils/studentValidation');
+const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
 
 const normalize = (str) => str.trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -105,7 +106,9 @@ router.post('/verify-student', async (req, res) => {
         });
       }
       
+      await finalizeAttendanceForActiveSession(existingSession, new Date());
       existingSession.status = 'ended';
+      existingSession.endedAt = new Date();
       await existingSession.save();
     }
 
@@ -215,10 +218,13 @@ router.post('/force-logout', async (req, res) => {
       });
     }
 
-    await ActiveSession.updateOne(
-      { lmsId: sanitizedLmsId, status: 'active' },
-      { $set: { status: 'ended' } }
-    );
+    const activeSession = await ActiveSession.findOne({ lmsId: sanitizedLmsId, status: 'active' });
+    if (activeSession) {
+      await finalizeAttendanceForActiveSession(activeSession, new Date());
+      activeSession.status = 'ended';
+      activeSession.endedAt = new Date();
+      await activeSession.save();
+    }
 
     return res.status(200).json({
       success: true,
@@ -248,17 +254,19 @@ router.post('/logout', async (req, res) => {
       });
     }
 
-    const result = await ActiveSession.updateOne(
-      { lmsId: lmsId.trim(), status: 'active' },
-      { $set: { status: 'ended' } }
-    );
+    const activeSession = await ActiveSession.findOne({ lmsId: lmsId.trim(), status: 'active' });
 
-    if (result.matchedCount === 0) {
+    if (!activeSession) {
       return res.status(404).json({
         success: false,
         message: 'No active session found'
       });
     }
+
+    await finalizeAttendanceForActiveSession(activeSession, new Date());
+    activeSession.status = 'ended';
+    activeSession.endedAt = new Date();
+    await activeSession.save();
 
     return res.status(200).json({
       success: true,

@@ -64,20 +64,11 @@ function resolveWindow(query = {}) {
 
 function buildStudentQuery(query = {}) {
   const studentQuery = {};
-  if (query.course) {
-    studentQuery.course = query.course;
-  }
   if (query.batch) {
     studentQuery.batch = query.batch;
   }
-  if (query.search) {
-    const search = escapeRegex(query.search.trim());
-    studentQuery.$or = [
-      { lmsId: new RegExp(search, 'i') },
-      { name: new RegExp(search, 'i') },
-      { phoneNumber: new RegExp(search, 'i') },
-      { batch: new RegExp(search, 'i') }
-    ];
+  if (query.course) {
+    studentQuery.course = query.course;
   }
 
   return studentQuery;
@@ -90,14 +81,11 @@ function buildAttendanceMatch(query = {}, window = {}) {
     if (window.start) attendanceMatch.attendedAt.$gte = window.start;
     if (window.end) attendanceMatch.attendedAt.$lte = window.end;
   }
-  if (query.course) {
-    attendanceMatch.course = query.course;
-  }
   if (query.batch) {
     attendanceMatch.batch = query.batch;
   }
-  if (query.trainer) {
-    attendanceMatch.trainerName = query.trainer;
+  if (query.course) {
+    attendanceMatch.course = query.course;
   }
   if (query.sessionId) {
     attendanceMatch.sessionId = query.sessionId;
@@ -138,6 +126,16 @@ function buildSectionRows(sectionName, records) {
   }));
 }
 
+function resolveDurationMinutes(record) {
+  const baseMinutes = Math.max(Number(record.durationMinutes || 0), 0);
+  if (record.currentJoinStartedAt) {
+    const currentSegmentMs = Date.now() - new Date(record.currentJoinStartedAt).getTime();
+    return Math.round((baseMinutes + (currentSegmentMs / 60000)) * 10) / 10;
+  }
+
+  return Math.round(baseMinutes * 10) / 10;
+}
+
 async function buildAttendanceSnapshot(query = {}) {
   const window = resolveWindow(query);
   const studentQuery = buildStudentQuery(query);
@@ -146,65 +144,94 @@ async function buildAttendanceSnapshot(query = {}) {
   const [students, attendanceRecords, sessions] = await Promise.all([
     Student.find(studentQuery).select('lmsId name phoneNumber batch course createdAt').lean(),
     AttendanceRecord.find(attendanceMatch)
-      .select('lmsId studentName phoneNumber course batch sessionId sessionName trainerName attendanceDate attendedAt status')
+      .select('lmsId studentName phoneNumber course batch sessionId sessionName trainerName attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes')
       .sort({ attendedAt: 1 })
       .lean(),
-    ClassSession.find({}).select('sessionId title createdBy courses createdAt').sort({ createdAt: -1 }).lean()
+    ClassSession.find({}).select('sessionId title createdBy batch courses createdAt').sort({ createdAt: -1 }).lean()
   ]);
 
-  const sessionTimeline = Array.from(new Map(attendanceRecords.map((record) => [record.sessionId, record.attendedAt || record.createdAt || record.updatedAt])).entries())
-    .sort((left, right) => new Date(left[1]) - new Date(right[1]))
-    .map(([sessionId]) => sessionId);
+  const filteredSessions = sessions.filter((session) => {
+    if (query.batch && session.batch !== query.batch) {
+      return false;
+    }
+
+    if (query.course) {
+      const sessionCourses = Array.isArray(session.courses) ? session.courses : [];
+      if (!sessionCourses.includes(query.course)) {
+        return false;
+      }
+    }
+
+    if (query.sessionId && session.sessionId !== query.sessionId) {
+      return false;
+    }
+
+    if (query.search) {
+      const search = query.search.trim().toLowerCase();
+      const haystack = [
+        session.sessionId,
+        session.title,
+        session.batch,
+        ...(Array.isArray(session.courses) ? session.courses : [])
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      if (!haystack.includes(search)) {
+        return false;
+      }
+    }
+
+    if (window.start || window.end) {
+      const createdAt = session.createdAt ? new Date(session.createdAt) : null;
+      if (!createdAt || Number.isNaN(createdAt.getTime())) {
+        return false;
+      }
+      if (window.start && createdAt < window.start) {
+        return false;
+      }
+      if (window.end && createdAt > window.end) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  const sessionsById = new Map(filteredSessions.map((session) => [session.sessionId, session]));
+  const relevantSessionIds = new Set(filteredSessions.map((session) => session.sessionId));
+  const relevantAttendanceRecords = attendanceRecords.filter((record) => relevantSessionIds.has(record.sessionId));
+  const sessionTimeline = filteredSessions
+    .slice()
+    .sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt))
+    .map((session) => session.sessionId);
 
   const sessionsConducted = sessionTimeline.length;
   const presentStudentIdsToday = new Set(
-    attendanceRecords
+    relevantAttendanceRecords
       .filter((record) => formatDateValue(record.attendedAt) === formatDateValue(new Date()))
       .map((record) => record.lmsId)
   );
 
-  const studentsById = new Map(students.map((student) => [student.lmsId, student]));
   const attendanceByStudent = new Map();
-  attendanceRecords.forEach((record) => {
+  relevantAttendanceRecords.forEach((record) => {
     if (!attendanceByStudent.has(record.lmsId)) {
       attendanceByStudent.set(record.lmsId, []);
     }
     attendanceByStudent.get(record.lmsId).push(record);
   });
 
-  const batchGroups = new Map();
   const courseGroups = new Map();
-  const sessionGroups = new Map();
   students.forEach((student) => {
     const studentRecords = attendanceByStudent.get(student.lmsId) || [];
     const presentSessions = new Set(studentRecords.map((record) => record.sessionId)).size;
-    const batchKey = normalizeText(student.batch) || 'Unassigned';
     const courseKey = Array.isArray(student.course) && student.course.length > 0 ? student.course[0] : (normalizeText(student.course) || 'Unassigned');
 
-    if (!batchGroups.has(batchKey)) batchGroups.set(batchKey, { totalStudents: 0, presentSessions: 0 });
     if (!courseGroups.has(courseKey)) courseGroups.set(courseKey, { totalStudents: 0, presentSessions: 0 });
 
-    batchGroups.get(batchKey).totalStudents += 1;
     courseGroups.get(courseKey).totalStudents += 1;
-    batchGroups.get(batchKey).presentSessions += presentSessions;
     courseGroups.get(courseKey).presentSessions += presentSessions;
-  });
-
-  attendanceRecords.forEach((record) => {
-    if (!sessionGroups.has(record.sessionId)) {
-      sessionGroups.set(record.sessionId, {
-        sessionId: record.sessionId,
-        sessionName: record.sessionName,
-        trainerName: record.trainerName || '',
-        presentCount: 0,
-        studentIds: new Set(),
-        attendanceDate: record.attendanceDate || formatDateValue(record.attendedAt)
-      });
-    }
-
-    const entry = sessionGroups.get(record.sessionId);
-    entry.presentCount += 1;
-    entry.studentIds.add(record.lmsId);
   });
 
   const atRiskThreshold = Math.max(Number(query.threshold || 75), 1);
@@ -232,8 +259,8 @@ async function buildAttendanceSnapshot(query = {}) {
       return {
         lmsId: student.lmsId,
         name: student.name,
+        batch: student.batch || 'Unassigned',
         course: Array.isArray(student.course) ? student.course.join(', ') : (student.course || 'Unassigned'),
-        batch: normalizeText(student.batch) || 'Unassigned',
         phoneNumber: student.phoneNumber || '',
         attendancePercentage,
         missedSessions,
@@ -257,8 +284,8 @@ async function buildAttendanceSnapshot(query = {}) {
       lmsId: student.lmsId,
       name: student.name,
       phoneNumber: student.phoneNumber || '',
+      batch: student.batch || 'Unassigned',
       course: Array.isArray(student.course) ? student.course.join(', ') : (student.course || 'Unassigned'),
-      batch: normalizeText(student.batch) || 'Unassigned',
       attendancePercentage,
       presentSessions,
       absentSessions: Math.max(sessionsConducted - presentSessions, 0),
@@ -266,22 +293,23 @@ async function buildAttendanceSnapshot(query = {}) {
     };
   });
 
-  const sessionSummaries = Array.from(sessionGroups.values()).map((entry) => ({
-    sessionId: entry.sessionId,
-    sessionName: entry.sessionName,
-    trainerName: entry.trainerName || '',
-    presentCount: entry.presentCount,
-    uniqueStudents: entry.studentIds.size,
-    attendancePercentage: getAttendanceRate(entry.studentIds.size, Math.max(students.length, 1)),
-    attendanceDate: entry.attendanceDate || ''
-  }));
+  const sessionSummaries = filteredSessions.map((session) => {
+    const recordsForSession = relevantAttendanceRecords.filter((record) => record.sessionId === session.sessionId);
+    const uniqueStudents = new Set(recordsForSession.map((record) => record.lmsId)).size;
+    const attendanceDate = recordsForSession[0]?.attendanceDate || formatDateValue(session.createdAt);
 
-  const batchSummaries = Array.from(batchGroups.entries()).map(([batch, value]) => ({
-    batch,
-    totalStudents: value.totalStudents,
-    presentSessions: value.presentSessions,
-    attendancePercentage: getAttendanceRate(value.presentSessions, Math.max(sessionsConducted * value.totalStudents, 1))
-  }));
+    return {
+      sessionId: session.sessionId,
+      sessionName: session.title,
+      batch: session.batch || 'Unassigned',
+      course: Array.isArray(session.courses) ? session.courses.join(', ') : '',
+      trainerName: session.createdBy || '',
+      presentCount: uniqueStudents,
+      uniqueStudents,
+      attendancePercentage: getAttendanceRate(uniqueStudents, Math.max(students.length, 1)),
+      attendanceDate: attendanceDate || ''
+    };
+  });
 
   const courseSummaries = Array.from(courseGroups.entries()).map(([course, value]) => ({
     course,
@@ -291,7 +319,7 @@ async function buildAttendanceSnapshot(query = {}) {
   }));
 
   const trendMap = new Map();
-  attendanceRecords.forEach((record) => {
+  relevantAttendanceRecords.forEach((record) => {
     const dateKey = record.attendanceDate || formatDateValue(record.attendedAt);
     if (!dateKey) return;
     if (!trendMap.has(dateKey)) {
@@ -304,7 +332,7 @@ async function buildAttendanceSnapshot(query = {}) {
   });
 
   const monthlyMap = new Map();
-  attendanceRecords.forEach((record) => {
+  relevantAttendanceRecords.forEach((record) => {
     const attendedAt = record.attendedAt ? new Date(record.attendedAt) : null;
     if (!attendedAt || Number.isNaN(attendedAt.getTime())) return;
     const monthKey = `${attendedAt.getFullYear()}-${String(attendedAt.getMonth() + 1).padStart(2, '0')}`;
@@ -317,19 +345,17 @@ async function buildAttendanceSnapshot(query = {}) {
     entry.sessions.add(record.sessionId);
   });
 
-  const totalPresentEntries = attendanceRecords.length;
+  const totalPresentEntries = relevantAttendanceRecords.length;
   const totalPossibleEntries = students.length * Math.max(sessionsConducted, 1);
   const overallAttendancePercentage = totalPossibleEntries > 0 ? Math.round((totalPresentEntries / totalPossibleEntries) * 1000) / 10 : 0;
 
   return {
     window,
     filters: {
-      course: normalizeText(query.course),
       batch: normalizeText(query.batch),
-      trainer: normalizeText(query.trainer),
+      course: normalizeText(query.course),
       sessionId: normalizeText(query.sessionId),
-      search: normalizeText(query.search),
-      threshold: atRiskThreshold
+      search: normalizeText(query.search)
     },
     metrics: {
       totalStudents: students.length,
@@ -347,13 +373,6 @@ async function buildAttendanceSnapshot(query = {}) {
         sessions: entry.sessions.size
       }))
       .sort((left, right) => new Date(left.date) - new Date(right.date)),
-    batchComparison: Array.from(batchGroups.entries())
-      .map(([batch, value]) => ({
-        batch,
-        totalStudents: value.totalStudents,
-        attendancePercentage: getAttendanceRate(value.presentSessions, Math.max(sessionsConducted * value.totalStudents, 1))
-      }))
-      .sort((left, right) => right.attendancePercentage - left.attendancePercentage),
     coursePerformance: Array.from(courseGroups.entries())
       .map(([course, value]) => ({
         course,
@@ -363,7 +382,6 @@ async function buildAttendanceSnapshot(query = {}) {
       .sort((left, right) => right.attendancePercentage - left.attendancePercentage),
     studentSummaries,
     sessionSummaries,
-    batchSummaries,
     courseSummaries,
     monthlySummaries: Array.from(monthlyMap.values())
       .map((entry) => ({
@@ -375,23 +393,23 @@ async function buildAttendanceSnapshot(query = {}) {
       .sort((left, right) => left.month.localeCompare(right.month)),
     atRiskStudents,
     students,
-    attendanceRecords,
-    sessions,
+    attendanceRecords: relevantAttendanceRecords,
+    sessions: filteredSessions,
     totalStudentsFiltered: students.length,
     totalAttendanceEntries: totalPresentEntries
   };
 }
 
 function toCsvRows(records) {
-  const headers = ['LMS ID', 'Name', 'Phone Number', 'Course', 'Batch', 'Session', 'Trainer', 'Attendance Date', 'Status', 'Attendance Percentage', 'Last Attendance Date'];
+  const headers = ['LMS ID', 'Name', 'Phone Number', 'Batch', 'Course', 'Session', 'Trainer', 'Attendance Date', 'Status', 'Attendance Percentage', 'Last Attendance Date'];
   const lines = [headers.map(buildCsvValue).join(',')];
   records.forEach((record) => {
     lines.push([
       record.lmsId,
       record.name,
       record.phoneNumber,
-      record.course,
       record.batch,
+      record.course,
       record.sessionName || record.sessionId,
       record.trainerName,
       record.attendanceDate,
@@ -414,7 +432,6 @@ function toComprehensiveCsv(snapshot) {
   [
     ['Students', snapshot.studentSummaries],
     ['Sessions', snapshot.sessionSummaries],
-    ['Batches', snapshot.batchSummaries],
     ['Courses', snapshot.courseSummaries],
     ['Monthly', snapshot.monthlySummaries],
     ['At-Risk', snapshot.atRiskStudents]
@@ -433,8 +450,8 @@ function toExcelSheetRows(snapshot) {
   return snapshot.atRiskStudents.map((student) => ({
     'LMS ID': student.lmsId,
     Name: student.name,
-    Course: student.course,
     Batch: student.batch,
+    Course: student.course,
     'Attendance Percentage': student.attendancePercentage,
     'Missed Sessions': student.missedSessions,
     'Consecutive Missed Sessions': student.consecutiveMissedSessions,
@@ -456,29 +473,25 @@ router.get('/insights', authMiddleware, async (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
     const search = normalizeText(req.query.search).toLowerCase();
+    let filteredSessions = snapshot.sessionSummaries;
 
-    let filteredRiskStudents = snapshot.atRiskStudents;
     if (search) {
-      filteredRiskStudents = filteredRiskStudents.filter((student) => {
-        return [student.lmsId, student.name, student.course, student.batch, student.phoneNumber, student.lastAttendanceDate]
+      filteredSessions = filteredSessions.filter((session) => {
+        return [session.sessionId, session.sessionName, session.batch, session.course, session.attendanceDate]
           .filter(Boolean)
           .some((field) => String(field).toLowerCase().includes(search));
       });
     }
 
-    const total = filteredRiskStudents.length;
+    const total = filteredSessions.length;
     const totalPages = Math.max(Math.ceil(total / limit), 1);
-    const pageItems = filteredRiskStudents.slice((page - 1) * limit, page * limit);
+    const pageItems = filteredSessions.slice((page - 1) * limit, page * limit);
 
     return res.status(200).json({
       success: true,
       message: 'Attendance insights retrieved successfully',
       metrics: snapshot.metrics,
-      trends: snapshot.trends,
-      batchComparison: snapshot.batchComparison,
-      coursePerformance: snapshot.coursePerformance,
-      monthlySummaries: snapshot.monthlySummaries,
-      atRiskStudents: pageItems,
+      sessionSummaries: pageItems,
       pagination: {
         page,
         limit,
@@ -489,6 +502,123 @@ router.get('/insights', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Error loading attendance insights:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/admin/attendance/session/:sessionId
+ */
+router.get('/session/:sessionId', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const sessionId = normalizeText(req.params.sessionId);
+    if (!sessionId) {
+      return res.status(400).json({ success: false, message: 'Session ID is required' });
+    }
+
+    const window = resolveWindow(req.query);
+    const attendanceMatch = buildAttendanceMatch({ ...req.query, sessionId }, window);
+    const records = await AttendanceRecord.find(attendanceMatch)
+      .select('lmsId studentName phoneNumber course batch sessionId sessionName trainerName attendanceDate attendedAt status')
+      .sort({ attendedAt: 1 })
+      .lean();
+
+    const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch courses createdBy').lean();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Session attendance retrieved successfully',
+      session: {
+        sessionId,
+        sessionName: session?.title || records[0]?.sessionName || sessionId,
+        batch: session?.batch || records[0]?.batch || '',
+        course: Array.isArray(session?.courses) ? session.courses.join(', ') : (records[0]?.course || ''),
+        trainerName: session?.createdBy || records[0]?.trainerName || '',
+        attendanceDate: records[0]?.attendanceDate || null
+      },
+      records: records.map((record) => ({
+        lmsId: record.lmsId,
+        studentName: record.studentName,
+        phoneNumber: record.phoneNumber || '',
+        attendedAt: record.attendedAt,
+        attendanceDate: record.attendanceDate || null,
+        status: record.status || 'present',
+        durationMinutes: resolveDurationMinutes(record)
+      }))
+    });
+  } catch (error) {
+    console.error('Error loading session attendance:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/admin/attendance/roster
+ */
+router.get('/roster', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const snapshot = await buildAttendanceSnapshot(req.query);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const search = normalizeText(req.query.search).toLowerCase();
+    const attendanceBand = normalizeText(req.query.attendanceBand || 'all').toLowerCase();
+    const sortBy = normalizeText(req.query.sortBy || 'attendance-desc').toLowerCase();
+
+    let roster = snapshot.studentSummaries;
+
+    if (search) {
+      roster = roster.filter((student) => {
+        return [student.lmsId, student.name, student.phoneNumber, student.batch, student.course]
+          .filter(Boolean)
+          .some((field) => String(field).toLowerCase().includes(search));
+      });
+    }
+
+    if (attendanceBand === 'perfect') {
+      roster = roster.filter((student) => Number(student.attendancePercentage || 0) === 100);
+    } else if (attendanceBand === 'above75') {
+      roster = roster.filter((student) => Number(student.attendancePercentage || 0) >= 75);
+    } else if (attendanceBand === 'below75') {
+      roster = roster.filter((student) => Number(student.attendancePercentage || 0) < 75);
+    } else if (attendanceBand === 'below50') {
+      roster = roster.filter((student) => Number(student.attendancePercentage || 0) < 50);
+    }
+
+    if (sortBy === 'attendance-asc') {
+      roster = roster.sort((left, right) => left.attendancePercentage - right.attendancePercentage || left.name.localeCompare(right.name));
+    } else if (sortBy === 'name-asc') {
+      roster = roster.sort((left, right) => left.name.localeCompare(right.name));
+    } else if (sortBy === 'name-desc') {
+      roster = roster.sort((left, right) => right.name.localeCompare(left.name));
+    } else {
+      roster = roster.sort((left, right) => right.attendancePercentage - left.attendancePercentage || left.name.localeCompare(right.name));
+    }
+
+    const total = roster.length;
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const pageItems = roster.slice((page - 1) * limit, page * limit);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Attendance roster retrieved successfully',
+      students: pageItems,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages
+      }
+    });
+  } catch (error) {
+    console.error('Error loading attendance roster:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -542,7 +672,7 @@ router.get('/report', authMiddleware, async (req, res) => {
       snapshot.atRiskStudents.slice(0, 20).forEach((student) => {
         doc.moveDown(0.25);
         doc.fontSize(9).text(
-          `${student.lmsId} | ${student.name} | ${student.course} | ${student.batch} | ${student.attendancePercentage}% | ${student.lastAttendanceDate || 'N/A'}`
+          `${student.lmsId} | ${student.name} | ${student.course} | ${student.attendancePercentage}% | ${student.lastAttendanceDate || 'N/A'}`
         );
       });
       doc.end();
@@ -554,20 +684,17 @@ router.get('/report', authMiddleware, async (req, res) => {
     const summarySheet = XLSX.utils.json_to_sheet([
       snapshot.metrics,
       ...snapshot.trends.map((row) => ({ section: 'trend', ...row })),
-      ...snapshot.batchComparison.map((row) => ({ section: 'batchComparison', ...row })),
       ...snapshot.coursePerformance.map((row) => ({ section: 'coursePerformance', ...row })),
       ...snapshot.monthlySummaries.map((row) => ({ section: 'monthlySummaries', ...row }))
     ]);
     const studentSheet = XLSX.utils.json_to_sheet(snapshot.studentSummaries);
     const sessionSheet = XLSX.utils.json_to_sheet(snapshot.sessionSummaries);
-    const batchSheet = XLSX.utils.json_to_sheet(snapshot.batchSummaries);
     const courseSheet = XLSX.utils.json_to_sheet(snapshot.courseSummaries);
     const monthlySheet = XLSX.utils.json_to_sheet(snapshot.monthlySummaries);
     const riskSheet = XLSX.utils.json_to_sheet(toExcelSheetRows(snapshot));
     XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
     XLSX.utils.book_append_sheet(workbook, studentSheet, 'Students');
     XLSX.utils.book_append_sheet(workbook, sessionSheet, 'Sessions');
-    XLSX.utils.book_append_sheet(workbook, batchSheet, 'Batches');
     XLSX.utils.book_append_sheet(workbook, courseSheet, 'Courses');
     XLSX.utils.book_append_sheet(workbook, monthlySheet, 'Monthly');
     XLSX.utils.book_append_sheet(workbook, riskSheet, 'At-Risk Students');

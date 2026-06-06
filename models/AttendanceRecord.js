@@ -61,6 +61,34 @@ const attendanceRecordSchema = new mongoose.Schema(
       default: Date.now,
       index: true
     },
+    firstJoinedAt: {
+      type: Date,
+      default: null,
+      index: true
+    },
+    currentJoinStartedAt: {
+      type: Date,
+      default: null,
+      index: true
+    },
+    lastSeenAt: {
+      type: Date,
+      default: null,
+      index: true
+    },
+    leftAt: {
+      type: Date,
+      default: null,
+      index: true
+    },
+    durationMinutes: {
+      type: Number,
+      default: 0
+    },
+    sessionSegments: {
+      type: Number,
+      default: 0
+    },
     status: {
       type: String,
       enum: ['present', 'absent'],

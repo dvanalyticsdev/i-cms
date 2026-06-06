@@ -11,6 +11,7 @@ const IssueReport = require('../models/IssueReport');
 const SessionLog = require('../models/SessionLog');
 const { logSessionActivity } = require('../utils/sessionLogger');
 const { sanitizeLmsId, normalizePhoneNumber, isValidPhoneNumber } = require('../utils/studentValidation');
+const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
 const XLSX = require('xlsx');
 const crypto = require('crypto');
 
@@ -280,10 +281,11 @@ router.post('/session', authMiddleware, async (req, res) => {
       return;
     }
 
-    const { title, meetingNumber, passcode, description, courses } = req.body;
+    const { title, meetingNumber, passcode, description, courses, batch } = req.body;
+    const normalizedBatch = normalizeText(batch);
 
-    if (!title || !meetingNumber || !passcode) {
-      return res.status(400).json({ success: false, message: 'Title, Meeting Number, and Passcode are required' });
+    if (!title || !meetingNumber || !passcode || !normalizedBatch) {
+      return res.status(400).json({ success: false, message: 'Title, Meeting Number, Passcode, and Batch are required' });
     }
 
     const sanitizedMeetingNumber = meetingNumber.toString().replace(/\s/g, '');
@@ -302,6 +304,7 @@ router.post('/session', authMiddleware, async (req, res) => {
       meetingNumber: sanitizedMeetingNumber,
       passcode: passcode.toString().trim(),
       description: (description || '').trim(),
+      batch: normalizedBatch,
       courses: normalizedCourses,
       status: 'on',
       createdBy: req.admin.username
@@ -368,8 +371,8 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
       return;
     }
 
-    const { title, meetingNumber, passcode, description, courses } = req.body;
-    if (!title && !meetingNumber && !passcode && !description && !courses) {
+    const { title, meetingNumber, passcode, description, courses, batch } = req.body;
+    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined) {
       return res.status(400).json({ success: false, message: 'At least one field must be provided for update' });
     }
 
@@ -387,6 +390,13 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
     }
     if (passcode) updateData.passcode = passcode.toString().trim();
     if (description !== undefined) updateData.description = (description || '').trim();
+    if (batch !== undefined) {
+      const normalizedBatch = normalizeText(batch);
+      if (!normalizedBatch) {
+        return res.status(400).json({ success: false, message: 'Batch is required' });
+      }
+      updateData.batch = normalizedBatch;
+    }
     if (courses !== undefined) {
       const normalizedCourses = parseCourseNames(courses);
       await validateSelectedCourses(normalizedCourses);
@@ -461,7 +471,13 @@ router.delete('/session/:id', authMiddleware, async (req, res) => {
     const deletedSession = await ClassSession.findByIdAndDelete(req.params.id);
     if (!deletedSession) return res.status(404).json({ success: false, message: 'Session not found' });
 
-    await ActiveSession.updateMany({}, { $set: { status: 'ended' } });
+    const activeSessions = await ActiveSession.find({ status: 'active' });
+    for (const activeSession of activeSessions) {
+      await finalizeAttendanceForActiveSession(activeSession, new Date());
+      activeSession.status = 'ended';
+      activeSession.endedAt = new Date();
+      await activeSession.save();
+    }
     await logSessionActivity({
       sessionId: deletedSession.sessionId,
       sessionName: deletedSession.title,
@@ -894,10 +910,13 @@ router.delete('/revoke-id', authMiddleware, async (req, res) => {
     if (!updated) return res.status(404).json({ success: false, message: `${type.toUpperCase()} ID not found` });
 
     try {
-      await ActiveSession.updateMany(
-        { lmsId: idToRevoke, status: 'active' },
-        { status: 'ended', endedAt: new Date() }
-      );
+      const activeSessions = await ActiveSession.find({ lmsId: idToRevoke, status: 'active' });
+      for (const activeSession of activeSessions) {
+        await finalizeAttendanceForActiveSession(activeSession, new Date());
+        activeSession.status = 'ended';
+        activeSession.endedAt = new Date();
+        await activeSession.save();
+      }
     } catch (dbError) {
       console.warn('Could not end active sessions in MongoDB:', dbError.message);
     }
@@ -935,9 +954,9 @@ router.post('/students', authMiddleware, async (req, res) => {
     const { lmsId, name, phoneNumber, batch, courses } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
     const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
-    const sanitizedBatch = normalizeText(batch);
+    const normalizedBatch = normalizeText(batch);
 
-    if (!sanitizedLmsId || !name || !phoneNumber || !sanitizedBatch || !courses || !Array.isArray(courses) || courses.length === 0) {
+    if (!sanitizedLmsId || !name || !phoneNumber || !normalizedBatch || !courses || !Array.isArray(courses) || courses.length === 0) {
       return res.status(400).json({ success: false, message: 'LMS ID, Name, Phone Number, Batch, and at least one Course are required' });
     }
 
@@ -959,7 +978,7 @@ router.post('/students', authMiddleware, async (req, res) => {
       lmsId: sanitizedLmsId,
       name: name.trim(),
       phoneNumber: normalizedPhoneNumber,
-      batch: sanitizedBatch,
+      batch: normalizedBatch,
       course: courses.map(c => c.trim()).filter(c => c)
     });
     
@@ -982,9 +1001,9 @@ router.put('/students/:lmsId', authMiddleware, async (req, res) => {
     const { name, phoneNumber, batch, courses } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
     const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
-    const sanitizedBatch = normalizeText(batch);
+    const normalizedBatch = normalizeText(batch);
 
-    if (!name || !phoneNumber || !sanitizedBatch || !courses || !Array.isArray(courses) || courses.length === 0) {
+    if (!name || !phoneNumber || !normalizedBatch || !courses || !Array.isArray(courses) || courses.length === 0) {
       return res.status(400).json({ success: false, message: 'Name, Phone Number, Batch, and at least one Course are required' });
     }
 
@@ -1008,7 +1027,7 @@ router.put('/students/:lmsId', authMiddleware, async (req, res) => {
 
     const updated = await Student.findOneAndUpdate(
       { lmsId: sanitizedLmsId },
-      { name: name.trim(), phoneNumber: normalizedPhoneNumber, batch: sanitizedBatch, course: courses.map(c => c.trim()).filter(c => c) },
+      { name: name.trim(), phoneNumber: normalizedPhoneNumber, batch: normalizedBatch, course: courses.map(c => c.trim()).filter(c => c) },
       { new: true }
     ).lean();
 

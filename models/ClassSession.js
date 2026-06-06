@@ -43,6 +43,12 @@ const classSessionSchema = new mongoose.Schema(
       trim: true,
       default: ''
     },
+    batch: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true
+    },
     courses: {
       type: [String],
       default: [],

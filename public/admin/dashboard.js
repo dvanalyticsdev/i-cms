@@ -4,6 +4,7 @@
  */
 
 const API_BASE_URL = '/api/admin';
+const attendanceDemoMode = new URLSearchParams(window.location.search).get('attendanceDemo') === '1';
 let authToken = null;
 let currentEditingSessionId = null;
 let deleteTargetSessionId = null;
@@ -32,21 +33,84 @@ let currentExportFormat = 'json';
 let currentExportScope = 'all';
 let attendanceInsightsState = {
     metrics: {},
-    trends: [],
-    batchComparison: [],
-    coursePerformance: [],
-    monthlySummaries: [],
-    atRiskStudents: [],
+    sessionSummaries: [],
+    sessionAttendance: [],
+    selectedSession: null,
     pagination: { page: 1, limit: 10, total: 0, totalPages: 1 },
+    roster: [],
+    rosterPagination: { page: 1, limit: 20, total: 0, totalPages: 1 },
     filters: {}
 };
 let attendanceInsightsLoading = false;
+const attendanceDemoData = {
+    metrics: {
+        totalStudents: 42,
+        totalSessionsConducted: 2
+    },
+    sessionSummaries: [
+        {
+            sessionId: 'DEMO_SESSION_001',
+            sessionName: 'Frontend Attendance Demo',
+            batch: 'Batch A',
+            course: 'UI Engineering',
+            attendanceDate: '2026-06-06',
+            uniqueStudents: 24
+        },
+        {
+            sessionId: 'DEMO_SESSION_002',
+            sessionName: 'Backend Attendance Demo',
+            batch: 'Batch B',
+            course: 'Node.js API',
+            attendanceDate: '2026-06-05',
+            uniqueStudents: 18
+        }
+    ],
+    sessionAttendance: {
+        DEMO_SESSION_001: [
+            { lmsId: 'LMS1001', studentName: 'Aarav Mehta', phoneNumber: '9000011111', attendedAt: '2026-06-06T09:00:00.000Z', durationMinutes: 84, status: 'present' },
+            { lmsId: 'LMS1002', studentName: 'Diya Shah', phoneNumber: '9000022222', attendedAt: '2026-06-06T09:04:00.000Z', durationMinutes: 63, status: 'present' },
+            { lmsId: 'LMS1003', studentName: 'Kabir Nair', phoneNumber: '9000033333', attendedAt: '2026-06-06T09:10:00.000Z', durationMinutes: 37, status: 'present' }
+        ],
+        DEMO_SESSION_002: [
+            { lmsId: 'LMS2001', studentName: 'Ishita Rao', phoneNumber: '9000044444', attendedAt: '2026-06-05T10:00:00.000Z', durationMinutes: 92, status: 'present' },
+            { lmsId: 'LMS2002', studentName: 'Rohan Das', phoneNumber: '9000055555', attendedAt: '2026-06-05T10:08:00.000Z', durationMinutes: 58, status: 'present' }
+        ]
+    },
+    roster: [
+        { lmsId: 'LMS1001', name: 'Aarav Mehta', phoneNumber: '9000011111', batch: 'Batch A', course: 'UI Engineering', attendancePercentage: 100, presentSessions: 2, absentSessions: 0, lastAttendanceDate: '2026-06-06' },
+        { lmsId: 'LMS1002', name: 'Diya Shah', phoneNumber: '9000022222', batch: 'Batch A', course: 'UI Engineering', attendancePercentage: 88, presentSessions: 2, absentSessions: 0, lastAttendanceDate: '2026-06-06' },
+        { lmsId: 'LMS1003', name: 'Kabir Nair', phoneNumber: '9000033333', batch: 'Batch A', course: 'UI Engineering', attendancePercentage: 52, presentSessions: 1, absentSessions: 1, lastAttendanceDate: '2026-06-06' },
+        { lmsId: 'LMS2001', name: 'Ishita Rao', phoneNumber: '9000044444', batch: 'Batch B', course: 'Node.js API', attendancePercentage: 100, presentSessions: 2, absentSessions: 0, lastAttendanceDate: '2026-06-05' },
+        { lmsId: 'LMS2002', name: 'Rohan Das', phoneNumber: '9000055555', batch: 'Batch B', course: 'Node.js API', attendancePercentage: 45, presentSessions: 1, absentSessions: 1, lastAttendanceDate: '2026-06-05' }
+    ]
+};
 
 // ====================================
 // INITIALIZATION
 // ====================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    if (attendanceDemoMode) {
+        authToken = 'attendance-demo-token';
+        availableCourses = Array.from(new Set(attendanceDemoData.sessionSummaries.map(session => session.course).filter(Boolean)));
+        availableBatches = Array.from(new Set(attendanceDemoData.roster.map(student => student.batch).filter(Boolean)));
+        allSessions = attendanceDemoData.sessionSummaries.map(session => ({
+            sessionId: session.sessionId,
+            title: session.sessionName,
+            batch: session.batch
+        }));
+        const username = document.getElementById('adminUsername');
+        if (username) {
+            username.textContent = 'Attendance Demo';
+        }
+        setupEventListeners();
+        populateAttendanceFilterOptions();
+        populateSessionBatchOptions();
+        loadAttendanceInsights();
+        loadAttendanceRoster();
+        return;
+    }
+
     checkAuth();
     restorePendingToast();
     setupEventListeners();
@@ -59,6 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadStudents(); // Load students
     loadIssues(); // Load issue reports
     loadAttendanceInsights();
+    loadAttendanceRoster();
     setInterval(loadSessions, 30000); // Refresh sessions every 30 seconds
     setInterval(loadGuestIds, 30000); // Refresh guest IDs every 30 seconds
     setInterval(loadMentorIds, 30000); // Refresh mentor IDs every 30 seconds
@@ -66,6 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(loadStudents, 30000); // Refresh students every 30 seconds
     setInterval(loadIssues, 30000); // Refresh issues every 30 seconds
     setInterval(loadAttendanceInsights, 30000); // Refresh attendance insights every 30 seconds
+    setInterval(loadAttendanceRoster, 30000); // Refresh attendance roster every 30 seconds
 });
 
 /**
@@ -287,6 +353,7 @@ async function loadSessions() {
         renderSessions();
         updateStats();
         populateAttendanceFilterOptions();
+        populateSessionBatchOptions();
 
     } catch (error) {
         console.error('Error loading sessions:', error);
@@ -316,12 +383,13 @@ function renderSessions() {
         const courseDisplay = assignedCourses.length > 0
             ? assignedCourses.map(course => escapeHtml(course)).join(', ')
             : 'All Courses';
+        const batchDisplay = session.batch ? escapeHtml(session.batch) : '-';
 
         return `
         <tr>
             <td>${escapeHtml(session.title)}</td>
             <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${session.meetingNumber}</code></td>
-            <td>${courseDisplay}</td>
+            <td>${batchDisplay}<br><span style="color: #999; font-size: 12px;">${courseDisplay}</span></td>
             <td>
                 <button class="btn-toggle ${session.status}" onclick="toggleSessionStatus('${session._id}', '${session.status}')">
                     ${session.status === 'on' ? 'ON' : 'OFF'}
@@ -362,6 +430,8 @@ function openCreateSessionModal() {
     document.getElementById('meetingNumber').value = '';
     document.getElementById('passcode').value = '';
     document.getElementById('description').value = '';
+    populateSessionBatchOptions();
+    document.getElementById('sessionBatch').value = '';
     renderCoursesCheckboxes([]); // Clear course selection
     document.getElementById('modalTitle').textContent = 'Create Session';
     document.getElementById('saveButtonText').textContent = 'Create Session';
@@ -386,6 +456,8 @@ async function openEditSessionModal(sessionId) {
     document.getElementById('meetingNumber').value = session.meetingNumber;
     document.getElementById('passcode').value = session.passcode;
     document.getElementById('description').value = session.description || '';
+    populateSessionBatchOptions();
+    document.getElementById('sessionBatch').value = session.batch || '';
     renderCoursesCheckboxes(session.courses || []); // Pre-select session's courses
     document.getElementById('modalTitle').textContent = 'Edit Session';
     document.getElementById('saveButtonText').textContent = 'Save Changes';
@@ -413,10 +485,11 @@ async function handleSaveSession(event) {
     const meetingNumber = meetingNumberRaw.replace(/\s+/g, '');
     const passcode = document.getElementById('passcode').value.trim();
     const description = document.getElementById('description').value.trim();
+    const batch = document.getElementById('sessionBatch').value.trim();
     const courses = getSelectedCourses();
 
     // Validation
-    if (!title || !meetingNumber || !passcode) {
+    if (!title || !meetingNumber || !passcode || !batch) {
         showToast('Please fill in all required fields', 'error');
         return;
     }
@@ -446,6 +519,7 @@ async function handleSaveSession(event) {
                 meetingNumber,
                 passcode,
                 description,
+                batch,
                 courses
             })
         });
@@ -1530,8 +1604,7 @@ async function loadStudents() {
 
         allStudents = data.students || [];
         filteredStudents = [...allStudents];  // Initialize filtered list
-        availableBatches = Array.from(new Set(allStudents.map(student => student.batch).filter(Boolean))).sort();
-        
+        availableBatches = Array.from(new Set(allStudents.map(student => (student.batch || '').trim()).filter(Boolean))).sort();
         // Merge any legacy student course names into the shared course list
         const allCoursesSet = new Set(availableCourses);
         allStudents.forEach(s => {
@@ -1545,6 +1618,7 @@ async function loadStudents() {
         
         populateStudentCourseFilter();  // Populate course filter dropdown
         populateAttendanceFilterOptions();
+        populateSessionBatchOptions();
         renderStudents();
         updateStudentStats();
 
@@ -1708,7 +1782,7 @@ function renderStudents() {
             <td>${escapeHtml(student.phoneNumber || '-')}</td>
             <td>${escapeHtml(student.batch || '-')}</td>
             <td>${escapeHtml(student.name)}</td>
-            <td>${escapeHtml(student.course)}</td>
+            <td>${escapeHtml(Array.isArray(student.course) ? student.course.join(', ') : (student.course || '-'))}</td>
             <td>
                 <div class="actions">
                     <button class="btn-action edit" onclick="openEditStudentModal('${escapeHtml(student.lmsId)}')" title="Edit">Edit</button>
@@ -2001,21 +2075,9 @@ async function confirmDeleteStudent() {
 }
 
 function populateAttendanceFilterOptions() {
-    const courseSelect = document.getElementById('attendanceCourseFilter');
     const batchSelect = document.getElementById('attendanceBatchFilter');
+    const courseSelect = document.getElementById('attendanceCourseFilter');
     const sessionSelect = document.getElementById('attendanceSessionFilter');
-
-    if (courseSelect) {
-        const currentValue = courseSelect.value;
-        courseSelect.innerHTML = '<option value="">All Courses</option>';
-        Array.from(new Set(availableCourses)).sort().forEach(course => {
-            const option = document.createElement('option');
-            option.value = course;
-            option.textContent = course;
-            courseSelect.appendChild(option);
-        });
-        courseSelect.value = currentValue;
-    }
 
     if (batchSelect) {
         const currentValue = batchSelect.value;
@@ -2027,6 +2089,18 @@ function populateAttendanceFilterOptions() {
             batchSelect.appendChild(option);
         });
         batchSelect.value = currentValue;
+    }
+
+    if (courseSelect) {
+        const currentValue = courseSelect.value;
+        courseSelect.innerHTML = '<option value="">All Courses</option>';
+        Array.from(new Set(availableCourses)).sort().forEach(course => {
+            const option = document.createElement('option');
+            option.value = course;
+            option.textContent = course;
+            courseSelect.appendChild(option);
+        });
+        courseSelect.value = currentValue;
     }
 
     if (sessionSelect) {
@@ -2042,16 +2116,31 @@ function populateAttendanceFilterOptions() {
     }
 }
 
+function populateSessionBatchOptions() {
+    const select = document.getElementById('sessionBatch');
+    if (!select) {
+        return;
+    }
+
+    const currentValue = select.value;
+    select.innerHTML = '<option value="">Select a batch</option>';
+    Array.from(new Set(availableBatches)).sort().forEach(batch => {
+        const option = document.createElement('option');
+        option.value = batch;
+        option.textContent = batch;
+        select.appendChild(option);
+    });
+    select.value = currentValue;
+}
+
 function collectAttendanceFilters() {
     return {
         timeframe: document.getElementById('attendanceTimeframe')?.value || 'monthly',
         from: document.getElementById('attendanceFromDate')?.value || '',
         to: document.getElementById('attendanceToDate')?.value || '',
-        course: document.getElementById('attendanceCourseFilter')?.value || '',
         batch: document.getElementById('attendanceBatchFilter')?.value || '',
-        trainer: document.getElementById('attendanceTrainerFilter')?.value.trim() || '',
+        course: document.getElementById('attendanceCourseFilter')?.value || '',
         sessionId: document.getElementById('attendanceSessionFilter')?.value || '',
-        threshold: document.getElementById('attendanceThreshold')?.value || '75',
         search: document.getElementById('attendanceSearch')?.value.trim() || ''
     };
 }
@@ -2063,95 +2152,99 @@ function applyAttendanceFilters() {
     if (fromDate) fromDate.disabled = timeframe !== 'custom';
     if (toDate) toDate.disabled = timeframe !== 'custom';
     loadAttendanceInsights(1);
+    loadAttendanceRoster(1);
 }
 
 function resetAttendanceFilters() {
     const timeframe = document.getElementById('attendanceTimeframe');
     const fromDate = document.getElementById('attendanceFromDate');
     const toDate = document.getElementById('attendanceToDate');
-    const course = document.getElementById('attendanceCourseFilter');
     const batch = document.getElementById('attendanceBatchFilter');
-    const trainer = document.getElementById('attendanceTrainerFilter');
+    const course = document.getElementById('attendanceCourseFilter');
     const session = document.getElementById('attendanceSessionFilter');
-    const threshold = document.getElementById('attendanceThreshold');
     const search = document.getElementById('attendanceSearch');
+    const rosterBand = document.getElementById('attendanceRosterBand');
+    const rosterSort = document.getElementById('attendanceRosterSort');
 
     if (timeframe) timeframe.value = 'monthly';
     if (fromDate) { fromDate.value = ''; fromDate.disabled = true; }
     if (toDate) { toDate.value = ''; toDate.disabled = true; }
-    if (course) course.value = '';
     if (batch) batch.value = '';
-    if (trainer) trainer.value = '';
+    if (course) course.value = '';
     if (session) session.value = '';
-    if (threshold) threshold.value = '75';
     if (search) search.value = '';
+    if (rosterBand) rosterBand.value = 'all';
+    if (rosterSort) rosterSort.value = 'attendance-desc';
 
     loadAttendanceInsights(1);
+    loadAttendanceRoster(1);
 }
 
-function openAttendanceExportModal() {
-    document.getElementById('attendanceExportModal').classList.remove('hidden');
-}
+function getAttendanceDemoSessions(filters) {
+    const search = (filters.search || '').toLowerCase();
 
-function closeAttendanceExportModal() {
-    document.getElementById('attendanceExportModal').classList.add('hidden');
-}
-
-async function confirmAttendanceExport() {
-    const reportType = document.getElementById('attendanceExportType').value;
-    const format = document.getElementById('attendanceExportFormat').value;
-    closeAttendanceExportModal();
-    await exportAttendanceReport(reportType, format);
-}
-
-async function exportAttendanceReport(reportType, format) {
-    try {
-        showToast('Preparing attendance report...', 'info');
-        const filters = collectAttendanceFilters();
-        const params = new URLSearchParams({
-            format,
-            reportType,
-            timeframe: reportType,
-            course: filters.course,
-            batch: filters.batch,
-            trainer: filters.trainer,
-            sessionId: filters.sessionId,
-            threshold: filters.threshold,
-            search: filters.search,
-            from: filters.from,
-            to: filters.to
-        });
-
-        const response = await fetch(`${API_BASE_URL}/attendance/report?${params.toString()}`, {
-            headers: {
-                'Authorization': `Bearer ${authToken}`
+    return attendanceDemoData.sessionSummaries.filter(session => {
+        if (filters.batch && session.batch !== filters.batch) {
+            return false;
+        }
+        if (filters.course && session.course !== filters.course) {
+            return false;
+        }
+        if (filters.sessionId && session.sessionId !== filters.sessionId) {
+            return false;
+        }
+        if (search) {
+            const haystack = [session.sessionId, session.sessionName, session.course].join(' ').toLowerCase();
+            if (!haystack.includes(search)) {
+                return false;
             }
-        });
-
-        if (response.status === 401) {
-            logout();
-            return;
         }
+        return true;
+    });
+}
 
-        if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data.message || 'Failed to export attendance report');
+function getAttendanceDemoRoster(filters) {
+    const search = (filters.search || '').toLowerCase();
+    const attendanceBand = document.getElementById('attendanceRosterBand')?.value || 'all';
+    const sortBy = document.getElementById('attendanceRosterSort')?.value || 'attendance-desc';
+
+    let records = attendanceDemoData.roster.filter(student => {
+        if (filters.batch && student.batch !== filters.batch) {
+            return false;
         }
+        if (filters.course && student.course !== filters.course) {
+            return false;
+        }
+        if (search) {
+            const haystack = [student.lmsId, student.name, student.phoneNumber, student.batch, student.course].join(' ').toLowerCase();
+            if (!haystack.includes(search)) {
+                return false;
+            }
+        }
+        return true;
+    });
 
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `attendance-report-${reportType}.${format === 'excel' ? 'xlsx' : format}`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(url);
-        showToast('Attendance report downloaded successfully', 'success');
-    } catch (error) {
-        console.error('Error exporting attendance report:', error);
-        showToast(error.message || 'Error exporting attendance report', 'error');
+    if (attendanceBand === 'perfect') {
+        records = records.filter(student => student.attendancePercentage === 100);
+    } else if (attendanceBand === 'above75') {
+        records = records.filter(student => student.attendancePercentage >= 75);
+    } else if (attendanceBand === 'below75') {
+        records = records.filter(student => student.attendancePercentage < 75);
+    } else if (attendanceBand === 'below50') {
+        records = records.filter(student => student.attendancePercentage < 50);
     }
+
+    if (sortBy === 'attendance-asc') {
+        records.sort((left, right) => left.attendancePercentage - right.attendancePercentage || left.name.localeCompare(right.name));
+    } else if (sortBy === 'name-asc') {
+        records.sort((left, right) => left.name.localeCompare(right.name));
+    } else if (sortBy === 'name-desc') {
+        records.sort((left, right) => right.name.localeCompare(left.name));
+    } else {
+        records.sort((left, right) => right.attendancePercentage - left.attendancePercentage || left.name.localeCompare(right.name));
+    }
+
+    return records;
 }
 
 async function loadAttendanceInsights(page = 1) {
@@ -2166,6 +2259,36 @@ async function loadAttendanceInsights(page = 1) {
     }
 
     try {
+        if (attendanceDemoMode) {
+            const filters = collectAttendanceFilters();
+            const sessions = getAttendanceDemoSessions(filters);
+            const roster = getAttendanceDemoRoster(filters);
+            const limit = 10;
+            const total = sessions.length;
+            const totalPages = Math.max(Math.ceil(total / limit), 1);
+            const pageItems = sessions.slice((page - 1) * limit, page * limit);
+
+            attendanceInsightsState = {
+                metrics: {
+                    totalStudents: roster.length,
+                    totalSessionsConducted: sessions.length
+                },
+                sessionSummaries: pageItems,
+                sessionAttendance: attendanceInsightsState.sessionAttendance || [],
+                selectedSession: attendanceInsightsState.selectedSession || null,
+                pagination: { page, limit, total, totalPages },
+                roster: attendanceInsightsState.roster || [],
+                rosterPagination: attendanceInsightsState.rosterPagination || { page: 1, limit: 20, total: 0, totalPages: 1 },
+                filters
+            };
+
+            renderAttendanceInsights();
+            if (filters.sessionId) {
+                await viewAttendance(filters.sessionId, false);
+            }
+            return;
+        }
+
         populateAttendanceFilterOptions();
         const filters = collectAttendanceFilters();
         const params = new URLSearchParams({
@@ -2174,11 +2297,9 @@ async function loadAttendanceInsights(page = 1) {
             timeframe: filters.timeframe,
             from: filters.from,
             to: filters.to,
-            course: filters.course,
             batch: filters.batch,
-            trainer: filters.trainer,
+            course: filters.course,
             sessionId: filters.sessionId,
-            threshold: filters.threshold,
             search: filters.search
         });
 
@@ -2200,16 +2321,27 @@ async function loadAttendanceInsights(page = 1) {
 
         attendanceInsightsState = {
             metrics: data.metrics || {},
-            trends: data.trends || [],
-            batchComparison: data.batchComparison || [],
-            coursePerformance: data.coursePerformance || [],
-            monthlySummaries: data.monthlySummaries || [],
-            atRiskStudents: data.atRiskStudents || [],
+            sessionSummaries: data.sessionSummaries || [],
+            sessionAttendance: attendanceInsightsState.sessionAttendance || [],
+            selectedSession: attendanceInsightsState.selectedSession || null,
             pagination: data.pagination || { page: 1, limit: 10, total: 0, totalPages: 1 },
+            roster: attendanceInsightsState.roster || [],
+            rosterPagination: attendanceInsightsState.rosterPagination || { page: 1, limit: 20, total: 0, totalPages: 1 },
             filters: data.filters || {}
         };
 
         renderAttendanceInsights();
+
+        if (filters.sessionId) {
+            await viewAttendance(filters.sessionId, false);
+        } else if (attendanceInsightsState.selectedSession?.sessionId) {
+            const stillVisible = (attendanceInsightsState.sessionSummaries || []).some(
+                session => session.sessionId === attendanceInsightsState.selectedSession.sessionId
+            );
+            if (!stillVisible) {
+                clearAttendanceDetailState();
+            }
+        }
     } catch (error) {
         console.error('Error loading attendance insights:', error);
         if (riskMeta) {
@@ -2219,7 +2351,7 @@ async function loadAttendanceInsights(page = 1) {
         if (riskList) {
             riskList.innerHTML = `
                 <tr>
-                    <td colspan="7" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load attendance insights')}</td>
+                    <td colspan="6" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load attendance insights')}</td>
                 </tr>
             `;
         }
@@ -2231,109 +2363,305 @@ async function loadAttendanceInsights(page = 1) {
 function renderAttendanceInsights() {
     const metrics = attendanceInsightsState.metrics || {};
     document.getElementById('attendanceTotalStudents').textContent = metrics.totalStudents ?? 0;
-    document.getElementById('attendancePresentToday').textContent = metrics.presentToday ?? 0;
-    document.getElementById('attendanceAbsentToday').textContent = metrics.absentToday ?? 0;
-    document.getElementById('attendanceOverallPercentage').textContent = `${metrics.overallAttendancePercentage ?? 0}%`;
-    document.getElementById('attendanceAtRisk').textContent = metrics.studentsAtRisk ?? 0;
     document.getElementById('attendanceTotalSessions').textContent = metrics.totalSessionsConducted ?? 0;
-
-    renderAttendanceChart('attendanceTrendChart', attendanceInsightsState.trends, {
-        labelKey: 'date',
-        valueKey: 'present',
-        titleKey: 'date',
-        emptyText: 'No attendance trend data available.'
-    });
-    renderAttendanceChart('attendanceBatchChart', attendanceInsightsState.batchComparison, {
-        labelKey: 'batch',
-        valueKey: 'attendancePercentage',
-        suffix: '%',
-        emptyText: 'No batch comparison data available.'
-    });
-    renderAttendanceChart('attendanceCourseChart', attendanceInsightsState.coursePerformance, {
-        labelKey: 'course',
-        valueKey: 'attendancePercentage',
-        suffix: '%',
-        emptyText: 'No course performance data available.'
-    });
-    renderAttendanceChart('attendanceMonthlyChart', attendanceInsightsState.monthlySummaries, {
-        labelKey: 'month',
-        valueKey: 'present',
-        emptyText: 'No monthly summary available.'
-    });
     renderAttendanceRiskTable();
     renderAttendancePagination();
+    renderAttendanceDetailTable();
 
     const riskMeta = document.getElementById('attendanceRiskMeta');
     if (riskMeta) {
         const pagination = attendanceInsightsState.pagination || {};
-        riskMeta.textContent = `${pagination.total || 0} at-risk student(s) matching the current filters`;
+        riskMeta.textContent = `${pagination.total || 0} session(s) matching the current filters`;
     }
-}
-
-function renderAttendanceChart(containerId, items, options) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    if (!items || items.length === 0) {
-        container.innerHTML = `<div class="chart-empty-state">${escapeHtml(options.emptyText || 'No data available')}</div>`;
-        return;
-    }
-
-    const valueKey = options.valueKey;
-    const labelKey = options.labelKey;
-    const suffix = options.suffix || '';
-    const maxValue = Math.max(...items.map(item => Number(item[valueKey]) || 0), 1);
-
-    container.innerHTML = `
-        <div class="chart-bars">
-            ${items.slice(0, 10).map(item => {
-                const value = Number(item[valueKey]) || 0;
-                const height = Math.max((value / maxValue) * 100, 6);
-                const label = String(item[labelKey] || 'N/A');
-                const title = `${label}: ${value}${suffix}`;
-                return `
-                    <div class="chart-bar-item" title="${escapeHtml(title)}">
-                        <div class="chart-bar-track">
-                            <div class="chart-bar-fill" style="height: ${height}%;"></div>
-                        </div>
-                        <div class="chart-bar-value">${escapeHtml(String(value))}${escapeHtml(suffix)}</div>
-                        <div class="chart-bar-label">${escapeHtml(label)}</div>
-                    </div>
-                `;
-            }).join('')}
-        </div>
-    `;
 }
 
 function renderAttendanceRiskTable() {
     const riskList = document.getElementById('attendanceRiskList');
     if (!riskList) return;
 
-    const records = attendanceInsightsState.atRiskStudents || [];
+    const records = attendanceInsightsState.sessionSummaries || [];
     if (records.length === 0) {
         riskList.innerHTML = `
             <tr>
-                <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No at-risk students found for the selected filters.</td>
+                <td colspan="6" style="text-align: center; padding: 40px; color: #999;">No sessions found for the selected filters.</td>
             </tr>
         `;
         return;
     }
 
-    riskList.innerHTML = records.map(student => `
+    riskList.innerHTML = records.map(session => `
         <tr>
-            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(student.lmsId)}</code></td>
-            <td>${escapeHtml(student.name)}</td>
-            <td>${escapeHtml(student.course)}</td>
-            <td>${escapeHtml(student.batch)}</td>
-            <td><strong>${escapeHtml(String(student.attendancePercentage ?? 0))}%</strong></td>
-            <td>${student.lastAttendanceDate ? escapeHtml(student.lastAttendanceDate) : '-'}</td>
             <td>
-                <div class="risk-reason-list">
-                    ${(student.riskReasons || []).map(reason => `<span class="risk-pill">${escapeHtml(reason)}</span>`).join('')}
-                </div>
+                <div style="font-weight: 600;">${escapeHtml(session.sessionName || session.sessionId)}</div>
+                <div style="color: #999; font-size: 12px;">${escapeHtml(session.sessionId)}</div>
+            </td>
+            <td>${escapeHtml(session.batch || '-')}</td>
+            <td>${escapeHtml(session.course || '-')}</td>
+            <td>${session.attendanceDate ? escapeHtml(session.attendanceDate) : '-'}</td>
+            <td><strong>${escapeHtml(String(session.uniqueStudents ?? session.presentCount ?? 0))}</strong></td>
+            <td>
+                <button class="btn btn-secondary" onclick="viewAttendance('${escapeHtml(session.sessionId)}')">View Attendance</button>
             </td>
         </tr>
     `).join('');
+}
+
+async function viewAttendance(sessionId, showLoadingState = true) {
+    if (!sessionId) {
+        return;
+    }
+
+    const detailMeta = document.getElementById('attendanceDetailMeta');
+    const detailList = document.getElementById('attendanceDetailList');
+    const sessionFilter = document.getElementById('attendanceSessionFilter');
+    const filters = collectAttendanceFilters();
+
+    if (sessionFilter) {
+        sessionFilter.value = sessionId;
+    }
+
+    if (showLoadingState && detailMeta) {
+        detailMeta.textContent = 'Loading session attendance...';
+    }
+
+    if (showLoadingState && detailList) {
+        detailList.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; padding: 40px; color: #999;">Loading session attendance...</td>
+            </tr>
+        `;
+    }
+
+    try {
+        if (attendanceDemoMode) {
+            const session = attendanceDemoData.sessionSummaries.find(item => item.sessionId === sessionId) || { sessionId, sessionName: sessionId };
+            attendanceInsightsState.selectedSession = session;
+            attendanceInsightsState.sessionAttendance = attendanceDemoData.sessionAttendance[sessionId] || [];
+            renderAttendanceDetailTable();
+            return;
+        }
+
+        const params = new URLSearchParams({
+            timeframe: filters.timeframe,
+            from: filters.from,
+            to: filters.to,
+            batch: filters.batch,
+            course: filters.course
+        });
+
+        const response = await fetch(`${API_BASE_URL}/attendance/session/${encodeURIComponent(sessionId)}?${params.toString()}`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to load session attendance');
+        }
+
+        attendanceInsightsState.selectedSession = data.session || { sessionId };
+        attendanceInsightsState.sessionAttendance = data.records || [];
+        renderAttendanceDetailTable();
+    } catch (error) {
+        console.error('Error loading session attendance:', error);
+        if (detailMeta) {
+            detailMeta.textContent = 'Unable to load session attendance right now.';
+        }
+        if (detailList) {
+            detailList.innerHTML = `
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load session attendance')}</td>
+                </tr>
+            `;
+        }
+    }
+}
+
+function clearAttendanceDetailState() {
+    attendanceInsightsState.selectedSession = null;
+    attendanceInsightsState.sessionAttendance = [];
+    renderAttendanceDetailTable();
+}
+
+function renderAttendanceDetailTable() {
+    const detailMeta = document.getElementById('attendanceDetailMeta');
+    const detailList = document.getElementById('attendanceDetailList');
+    if (!detailMeta || !detailList) return;
+
+    const session = attendanceInsightsState.selectedSession;
+    const records = attendanceInsightsState.sessionAttendance || [];
+
+    if (!session) {
+        detailMeta.textContent = 'Choose a session to view attendance.';
+        detailList.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    detailMeta.textContent = `${session.sessionName || session.sessionId} • ${records.length} student(s) joined`;
+
+    if (records.length === 0) {
+        detailList.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; padding: 40px; color: #999;">No attendance records found for this session.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    detailList.innerHTML = records.map(record => `
+        <tr>
+            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(record.lmsId)}</code></td>
+            <td>${escapeHtml(record.studentName || '-')}</td>
+            <td>${escapeHtml(record.phoneNumber || '-')}</td>
+            <td>${record.attendedAt ? escapeHtml(formatAttendanceDateTime(record.attendedAt)) : '-'}</td>
+            <td>${escapeHtml(formatDuration(record.durationMinutes))}</td>
+            <td><span class="risk-pill" style="background: rgba(72, 187, 120, 0.12); color: #276749;">${escapeHtml(record.status || 'present')}</span></td>
+        </tr>
+    `).join('');
+}
+
+async function loadAttendanceRoster(page = 1) {
+    const rosterMeta = document.getElementById('attendanceRosterMeta');
+    const rosterList = document.getElementById('attendanceRosterList');
+    const filters = collectAttendanceFilters();
+    const attendanceBand = document.getElementById('attendanceRosterBand')?.value || 'all';
+    const sortBy = document.getElementById('attendanceRosterSort')?.value || 'attendance-desc';
+
+    if (rosterMeta) {
+        rosterMeta.textContent = 'Loading roster...';
+    }
+
+    if (rosterList) {
+        rosterList.innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align: center; padding: 40px; color: #999;">Loading roster...</td>
+            </tr>
+        `;
+    }
+
+    try {
+        if (attendanceDemoMode) {
+            const filters = collectAttendanceFilters();
+            const records = getAttendanceDemoRoster(filters);
+            const limit = 20;
+            const total = records.length;
+            const totalPages = Math.max(Math.ceil(total / limit), 1);
+            attendanceInsightsState.roster = records.slice((page - 1) * limit, page * limit);
+            attendanceInsightsState.rosterPagination = { page, limit, total, totalPages };
+            renderAttendanceRoster();
+            return;
+        }
+
+        const params = new URLSearchParams({
+            page: String(page),
+            limit: '20',
+            timeframe: filters.timeframe,
+            from: filters.from,
+            to: filters.to,
+            batch: filters.batch,
+            course: filters.course,
+            sessionId: filters.sessionId,
+            search: filters.search,
+            attendanceBand,
+            sortBy
+        });
+
+        const response = await fetch(`${API_BASE_URL}/attendance/roster?${params.toString()}`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to load attendance roster');
+        }
+
+        attendanceInsightsState.roster = data.students || [];
+        attendanceInsightsState.rosterPagination = data.pagination || { page: 1, limit: 20, total: 0, totalPages: 1 };
+        renderAttendanceRoster();
+    } catch (error) {
+        console.error('Error loading attendance roster:', error);
+        if (rosterMeta) {
+            rosterMeta.textContent = 'Unable to load roster right now.';
+        }
+        if (rosterList) {
+            rosterList.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load attendance roster')}</td>
+                </tr>
+            `;
+        }
+    }
+}
+
+function renderAttendanceRoster() {
+    const rosterMeta = document.getElementById('attendanceRosterMeta');
+    const rosterList = document.getElementById('attendanceRosterList');
+    const rosterPagination = document.getElementById('attendanceRosterPagination');
+
+    if (!rosterMeta || !rosterList || !rosterPagination) {
+        return;
+    }
+
+    const records = attendanceInsightsState.roster || [];
+    const pagination = attendanceInsightsState.rosterPagination || { page: 1, totalPages: 1, total: 0 };
+    rosterMeta.textContent = `${pagination.total || 0} student(s) matching the current roster filters`;
+
+    if (records.length === 0) {
+        rosterList.innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align: center; padding: 40px; color: #999;">No students found for the selected filters.</td>
+            </tr>
+        `;
+    } else {
+        rosterList.innerHTML = records.map(student => `
+            <tr>
+                <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(student.lmsId)}</code></td>
+                <td>${escapeHtml(student.name || '-')}</td>
+                <td>${escapeHtml(student.phoneNumber || '-')}</td>
+                <td>${escapeHtml(student.course || '-')}</td>
+                <td><strong>${escapeHtml(String(student.attendancePercentage ?? 0))}%</strong></td>
+                <td>${escapeHtml(String(student.presentSessions ?? 0))}</td>
+                <td>${escapeHtml(String(student.absentSessions ?? 0))}</td>
+                <td>${student.lastAttendanceDate ? escapeHtml(student.lastAttendanceDate) : '-'}</td>
+            </tr>
+        `).join('');
+    }
+
+    const totalPages = Math.max(pagination.totalPages || 1, 1);
+    const currentPage = Math.max(pagination.page || 1, 1);
+    if (totalPages <= 1) {
+        rosterPagination.innerHTML = '';
+        return;
+    }
+
+    const buttons = [];
+    buttons.push(`<button class="pagination-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="loadAttendanceRoster(${currentPage - 1})">Prev</button>`);
+    for (let page = 1; page <= totalPages; page++) {
+        if (page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1) {
+            buttons.push(`<button class="pagination-btn ${page === currentPage ? 'active' : ''}" onclick="loadAttendanceRoster(${page})">${page}</button>`);
+        } else if (page === currentPage - 2 || page === currentPage + 2) {
+            buttons.push('<span style="padding: 8px 4px; color: #999;">...</span>');
+        }
+    }
+    buttons.push(`<button class="pagination-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="loadAttendanceRoster(${currentPage + 1})">Next</button>`);
+    rosterPagination.innerHTML = buttons.join('');
 }
 
 function renderAttendancePagination() {
@@ -2407,6 +2735,46 @@ function showToast(message, type = 'info') {
 /**
  * Format date
  */
+function formatAttendanceDateTime(dateString) {
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) {
+        return '-';
+    }
+
+    return date.toLocaleString('en-IN', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function formatDuration(durationMinutes) {
+    const minutesValue = Number(durationMinutes || 0);
+    if (!Number.isFinite(minutesValue) || minutesValue <= 0) {
+        return '0m';
+    }
+
+    if (minutesValue > 0 && minutesValue < 1) {
+        return '<1m';
+    }
+
+    const roundedMinutes = Math.round(minutesValue);
+    const hours = Math.floor(roundedMinutes / 60);
+    const minutes = roundedMinutes % 60;
+
+    if (hours <= 0) {
+        return `${minutes}m`;
+    }
+
+    if (minutes === 0) {
+        return `${hours}h`;
+    }
+
+    return `${hours}h ${minutes}m`;
+}
+
 function formatDate(dateString) {
     const date = new Date(dateString);
     const now = new Date();

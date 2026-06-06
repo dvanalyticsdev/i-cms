@@ -23,7 +23,7 @@ const studentSchema = new mongoose.Schema(
     },
     batch: {
       type: String,
-      default: '',
+      required: true,
       trim: true,
       index: true
     },

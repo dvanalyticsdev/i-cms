@@ -4,9 +4,9 @@ const ClassSession = require('../models/ClassSession');
 const ActiveSession = require('../models/ActiveSession');
 const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
-const AttendanceRecord = require('../models/AttendanceRecord');
 const { generateZoomSignature } = require('../utils/zoomSignature');
 const { logSessionActivity } = require('../utils/sessionLogger');
+const { finalizeAttendanceForActiveSession, recordSessionJoin } = require('../utils/attendanceTracker');
 
 /**
  * GET /api/class-sessions
@@ -14,6 +14,7 @@ const { logSessionActivity } = require('../utils/sessionLogger');
 router.get('/class-sessions', async (req, res) => {
   try {
     let studentCourse = null;
+    let studentBatch = null;
     const { lmsId } = req.query;
     
     if (lmsId) {
@@ -33,6 +34,7 @@ router.get('/class-sessions', async (req, res) => {
         }
       } else if (student && student.course) {
         studentCourse = student.course;
+        studentBatch = student.batch || null;
       }
     }
 
@@ -40,11 +42,14 @@ router.get('/class-sessions', async (req, res) => {
     
     if (studentCourse) {
       const allSessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode')
+        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch')
         .sort({ updatedAt: -1 })
         .lean();
       
       const filteredSessions = allSessions.filter(session => {
+        if (studentBatch && session.batch && session.batch !== studentBatch) {
+          return false;
+        }
         if (!session.courses || session.courses.length === 0) {
           return true;
         }
@@ -57,11 +62,12 @@ router.get('/class-sessions', async (req, res) => {
         message: 'Class sessions retrieved successfully',
         sessions: filteredSessions,
         total: filteredSessions.length,
-        studentCourse: studentCourse
+        studentCourse: studentCourse,
+        studentBatch: studentBatch
       });
     } else {
       const sessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode')
+        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch')
         .sort({ updatedAt: -1 })
         .lean();
 
@@ -130,33 +136,43 @@ router.post('/join-session', async (req, res) => {
     try {
       if (lmsId) {
         const student = await Student.findOne({ lmsId }).lean();
+        if (student && session.batch && student.batch && session.batch !== student.batch) {
+          return res.status(403).json({
+            success: false,
+            message: 'This session is assigned to a different batch'
+          });
+        }
+        const existingActiveSession = await ActiveSession.findOne({ lmsId, status: 'active' });
+
+        if (
+          existingActiveSession &&
+          existingActiveSession.classSessionId &&
+          existingActiveSession.classSessionId !== session.sessionId
+        ) {
+          await finalizeAttendanceForActiveSession(existingActiveSession, new Date());
+        }
+
         await ActiveSession.updateOne(
           { lmsId: lmsId, status: 'active' },
-          { $set: { classSessionId: session.sessionId, meetingNumber: session.meetingNumber, joinedAt: new Date() } }
+          { $set: { classSessionId: session.sessionId, meetingNumber: session.meetingNumber, joinedAt: new Date(), endedAt: null } }
         );
 
         if (student) {
-          const attendanceDate = new Date().toLocaleDateString('en-CA');
-          await AttendanceRecord.updateOne(
-            { lmsId, sessionId: session.sessionId },
-            {
-              $set: {
-                lmsId,
-                studentName: student.name || lmsId,
-                phoneNumber: student.phoneNumber || '',
-                course: Array.isArray(student.course) ? student.course[0] || '' : (student.course || ''),
-                batch: student.batch || '',
-                sessionId: session.sessionId,
-                sessionName: session.title,
-                trainerName: session.createdBy || '',
-                attendanceDate,
-                attendedAt: new Date(),
-                status: 'present',
-                source: 'session-join'
-              }
-            },
-            { upsert: true }
-          );
+          const joinedAt = new Date();
+          const attendanceDate = joinedAt.toLocaleDateString('en-CA');
+          await recordSessionJoin({
+            lmsId,
+            studentName: student.name || lmsId,
+            phoneNumber: student.phoneNumber || '',
+            course: Array.isArray(student.course) ? student.course[0] || '' : (student.course || ''),
+            batch: student.batch || '',
+            sessionId: session.sessionId,
+            sessionName: session.title,
+            trainerName: session.createdBy || '',
+            attendanceDate,
+            source: 'session-join',
+            joinedAt
+          });
         }
 
         await logSessionActivity({
