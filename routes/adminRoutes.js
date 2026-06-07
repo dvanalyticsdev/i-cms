@@ -934,12 +934,60 @@ router.delete('/revoke-id', authMiddleware, async (req, res) => {
 });
 
 /**
+ * GET /api/admin/students/batches
+ */
+router.get('/students/batches', authMiddleware, async (req, res) => {
+  try {
+    const batches = await Student.distinct('batch');
+    return res.status(200).json({ success: true, batches: batches.filter(Boolean) });
+  } catch (error) {
+    console.error('Error retrieving student batches:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
  * GET /api/admin/students
  */
 router.get('/students', authMiddleware, async (req, res) => {
   try {
-    const students = await Student.find({}).lean();
-    return res.status(200).json({ success: true, message: 'Students retrieved successfully', students, total: students.length });
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const search = req.query.search ? String(req.query.search).trim() : '';
+    const course = req.query.course ? String(req.query.course).trim() : '';
+
+    const query = {};
+
+    if (course) {
+      query.course = course;
+    }
+
+    if (search) {
+      const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.$or = [
+        { lmsId: new RegExp(escapedSearch, 'i') },
+        { name: new RegExp(escapedSearch, 'i') },
+        { batch: new RegExp(escapedSearch, 'i') },
+        { phoneNumber: new RegExp(escapedSearch, 'i') }
+      ];
+    }
+
+    const total = await Student.countDocuments(query);
+    const students = await Student.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Students retrieved successfully',
+      students,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(Math.ceil(total / limit), 1)
+    });
   } catch (error) {
     console.error('Error retrieving students:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });

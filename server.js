@@ -2,6 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const mongoose = require('mongoose');
 const { ensureMongoConnection, isMongoConnected } = require('./utils/mongoConnection');
 const { autoFinalizeStaleSessions } = require('./utils/attendanceTracker');
@@ -16,6 +17,9 @@ const issueRoutes = require('./routes/issueRoutes');
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Enable gzip/deflate response compression
+app.use(compression());
 
 // ====================================
 // MONGODB CONNECTION
@@ -94,14 +98,25 @@ app.use((req, res, next) => {
 });
 
 // Static file serving
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: '1d', // Cache static CSS, JS, etc. for 1 day
+  etag: true
+}));
 // Serve branding/logo assets from project Logos folder
-app.use('/Logos', express.static(path.join(__dirname, 'Logos')));
+app.use('/Logos', express.static(path.join(__dirname, 'Logos'), {
+  maxAge: '7d', // Cache logos for 7 days
+  etag: true
+}));
 
 // Serve favicon from Logos (use DV-Logo.png as favicon placeholder)
 app.get('/favicon.ico', (req, res) => {
   try {
-    res.sendFile(path.join(__dirname, 'Logos', 'DV-Logo.png'));
+    res.sendFile(path.join(__dirname, 'Logos', 'DV-Logo.png'), {
+      maxAge: '7d',
+      headers: {
+        'Cache-Control': 'public, max-age=604800'
+      }
+    });
   } catch (err) {
     res.status(404).end();
   }

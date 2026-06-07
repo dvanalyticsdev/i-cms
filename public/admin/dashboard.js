@@ -15,6 +15,9 @@ let currentEditingCourseId = null;
 let deleteTargetCourseId = null;
 let allStudents = [];
 let filteredStudents = [];
+let studentPageMeta = { page: 1, limit: 20, total: 0, totalPages: 1 };
+let studentSearchQuery = { search: '', course: '' };
+let studentSearchTimer = null;
 let deleteTargetLmsId = null;
 let availableBatches = [];
 let allIssues = [];
@@ -120,7 +123,8 @@ document.addEventListener('DOMContentLoaded', () => {
     loadGuestIds(); // Load guest IDs
     loadMentorIds(); // Load mentor IDs
     loadMockInterviewIds(); // Load mock interview IDs
-    loadStudents(); // Load students
+    loadStudents(1); // Load students (page 1)
+    loadStudentBatches(); // Load student batches for selection dropdowns
     loadIssues(); // Load issue reports
     loadAttendanceInsights();
     loadAttendanceRoster();
@@ -128,7 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(loadGuestIds, 30000); // Refresh guest IDs every 30 seconds
     setInterval(loadMentorIds, 30000); // Refresh mentor IDs every 30 seconds
     setInterval(loadMockInterviewIds, 30000); // Refresh mock interview IDs every 30 seconds
-    setInterval(loadStudents, 30000); // Refresh students every 30 seconds
+    setInterval(() => loadStudents(studentPageMeta.page), 30000); // Refresh current students page every 30 seconds
     setInterval(loadIssues, 30000); // Refresh issues every 30 seconds
     setInterval(loadAttendanceInsights, 30000); // Refresh attendance insights every 30 seconds
     setInterval(loadAttendanceRoster, 30000); // Refresh attendance roster every 30 seconds
@@ -1581,11 +1585,17 @@ async function confirmRevoke() {
 // ====================================
 
 /**
- * Load all students
+ * Load students with pagination and filtering
  */
-async function loadStudents() {
+async function loadStudents(page = 1) {
     try {
-        const response = await fetch(`${API_BASE_URL}/students`, {
+        studentPageMeta.page = page;
+        const searchVal = studentSearchQuery.search || '';
+        const courseVal = studentSearchQuery.course || '';
+        
+        const url = `${API_BASE_URL}/students?page=${page}&limit=${studentPageMeta.limit}&search=${encodeURIComponent(searchVal)}&course=${encodeURIComponent(courseVal)}`;
+        
+        const response = await fetch(url, {
             headers: {
                 'Authorization': `Bearer ${authToken}`
             }
@@ -1603,29 +1613,85 @@ async function loadStudents() {
         }
 
         allStudents = data.students || [];
-        filteredStudents = [...allStudents];  // Initialize filtered list
-        availableBatches = Array.from(new Set(allStudents.map(student => (student.batch || '').trim()).filter(Boolean))).sort();
-        // Merge any legacy student course names into the shared course list
-        const allCoursesSet = new Set(availableCourses);
-        allStudents.forEach(s => {
-            if (Array.isArray(s.course)) {
-                s.course.forEach(c => allCoursesSet.add(c));
-            } else if (s.course) {
-                allCoursesSet.add(s.course);
-            }
-        });
-        availableCourses = Array.from(allCoursesSet).sort();
+        filteredStudents = [...allStudents];
+        studentPageMeta.total = data.total || 0;
+        studentPageMeta.totalPages = data.totalPages || 1;
         
-        populateStudentCourseFilter();  // Populate course filter dropdown
-        populateAttendanceFilterOptions();
-        populateSessionBatchOptions();
         renderStudents();
         updateStudentStats();
+        renderStudentsPagination();
 
     } catch (error) {
         console.error('Error loading students:', error);
         showToast('Error loading students', 'error');
     }
+}
+
+/**
+ * Load student batches for selection dropdowns
+ */
+async function loadStudentBatches() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/students/batches`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (data.success) {
+            availableBatches = data.batches || [];
+            populateAttendanceFilterOptions();
+            populateSessionBatchOptions();
+        }
+    } catch (error) {
+        console.error('Error loading student batches:', error);
+    }
+}
+
+/**
+ * Render pagination controls for the student database table
+ */
+function renderStudentsPagination() {
+    const container = document.getElementById('studentsPagination');
+    if (!container) return;
+
+    if (studentPageMeta.totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+    
+    // Prev Button
+    if (studentPageMeta.page > 1) {
+        html += `<button class="pagination-btn" onclick="loadStudents(${studentPageMeta.page - 1})">Previous</button>`;
+    } else {
+        html += `<button class="pagination-btn" disabled>Previous</button>`;
+    }
+
+    // Page buttons
+    const startPage = Math.max(1, studentPageMeta.page - 2);
+    const endPage = Math.min(studentPageMeta.totalPages, studentPageMeta.page + 2);
+    
+    for (let i = startPage; i <= endPage; i++) {
+        const activeClass = i === studentPageMeta.page ? 'active' : '';
+        html += `<button class="pagination-btn ${activeClass}" onclick="loadStudents(${i})">${i}</button>`;
+    }
+
+    // Next Button
+    if (studentPageMeta.page < studentPageMeta.totalPages) {
+        html += `<button class="pagination-btn" onclick="loadStudents(${studentPageMeta.page + 1})">Next</button>`;
+    } else {
+        html += `<button class="pagination-btn" disabled>Next</button>`;
+    }
+
+    container.innerHTML = html;
 }
 
 /**
@@ -1797,7 +1863,11 @@ function renderStudents() {
  * Update student statistics
  */
 function updateStudentStats() {
-    document.getElementById('totalStudents').textContent = filteredStudents.length + ' of ' + allStudents.length;
+    const start = studentPageMeta.total > 0 ? (studentPageMeta.page - 1) * studentPageMeta.limit + 1 : 0;
+    const end = Math.min(studentPageMeta.page * studentPageMeta.limit, studentPageMeta.total);
+    document.getElementById('totalStudents').textContent = studentPageMeta.total > 0 
+        ? `${start}-${end} of ${studentPageMeta.total}`
+        : '0';
 }
 
 /**
@@ -1821,35 +1891,19 @@ function populateStudentCourseFilter() {
  * Filter and search students
  */
 function filterAndSearchStudents() {
-    const searchTerm = document.getElementById('studentSearch').value.toLowerCase().trim();
-    const selectedCourse = document.getElementById('studentCourseFilter').value;
+    if (studentSearchTimer) {
+        clearTimeout(studentSearchTimer);
+    }
 
-    filteredStudents = allStudents.filter(student => {
-        // Apply course filter - handle both single course (string) and multiple courses (array)
-        if (selectedCourse) {
-            const studentCourses = Array.isArray(student.course) ? student.course : [student.course];
-            if (!studentCourses.includes(selectedCourse)) {
-                return false;
-            }
-        }
+    studentSearchTimer = setTimeout(() => {
+        const searchTerm = document.getElementById('studentSearch').value.trim();
+        const selectedCourse = document.getElementById('studentCourseFilter').value;
 
-        // Apply search filter (search both LMS ID and Name)
-        if (searchTerm) {
-            const lmsIdMatch = student.lmsId.toLowerCase().includes(searchTerm);
-            const nameMatch = student.name.toLowerCase().includes(searchTerm);
-            const batchMatch = student.batch ? student.batch.toLowerCase().includes(searchTerm) : false;
-            const normalizedSearchTerm = searchTerm.replace(/\D/g, '');
-            const phoneMatch = normalizedSearchTerm && student.phoneNumber
-                ? String(student.phoneNumber).includes(normalizedSearchTerm)
-                : false;
-            return lmsIdMatch || nameMatch || batchMatch || phoneMatch;
-        }
+        studentSearchQuery.search = searchTerm;
+        studentSearchQuery.course = selectedCourse;
 
-        return true;
-    });
-
-    renderStudents();
-    updateStudentStats();
+        loadStudents(1);
+    }, 250);
 }
 
 /**
@@ -1858,9 +1912,9 @@ function filterAndSearchStudents() {
 function resetStudentFilters() {
     document.getElementById('studentSearch').value = '';
     document.getElementById('studentCourseFilter').value = '';
-    filteredStudents = [...allStudents];
-    renderStudents();
-    updateStudentStats();
+    studentSearchQuery.search = '';
+    studentSearchQuery.course = '';
+    loadStudents(1);
 }
 
 /**
@@ -2016,7 +2070,7 @@ async function handleSaveStudent(event) {
 
         showToast(editMode ? 'Student updated successfully' : 'Student added successfully', 'success');
         closeStudentModal();
-        loadStudents();
+        loadStudents(editMode ? studentPageMeta.page : 1);
 
     } catch (error) {
         console.error('Error saving student:', error);
@@ -2066,7 +2120,7 @@ async function confirmDeleteStudent() {
 
         showToast('Student deleted successfully', 'success');
         closeDeleteStudentModal();
-        loadStudents();
+        loadStudents(studentPageMeta.page);
 
     } catch (error) {
         console.error('Error deleting student:', error);

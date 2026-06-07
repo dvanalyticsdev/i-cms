@@ -141,13 +141,29 @@ async function buildAttendanceSnapshot(query = {}) {
   const studentQuery = buildStudentQuery(query);
   const attendanceMatch = buildAttendanceMatch(query, window);
 
+  const sessionQuery = {};
+  if (query.batch) {
+    sessionQuery.batch = query.batch;
+  }
+  if (query.course) {
+    sessionQuery.courses = query.course;
+  }
+  if (query.sessionId) {
+    sessionQuery.sessionId = query.sessionId;
+  }
+  if (window.start || window.end) {
+    sessionQuery.createdAt = {};
+    if (window.start) sessionQuery.createdAt.$gte = window.start;
+    if (window.end) sessionQuery.createdAt.$lte = window.end;
+  }
+
   const [students, attendanceRecords, sessions] = await Promise.all([
     Student.find(studentQuery).select('lmsId name phoneNumber batch course createdAt').lean(),
     AttendanceRecord.find(attendanceMatch)
       .select('lmsId studentName phoneNumber course batch sessionId sessionName trainerName attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes')
       .sort({ attendedAt: 1 })
       .lean(),
-    ClassSession.find({}).select('sessionId title createdBy batch courses createdAt').sort({ createdAt: -1 }).lean()
+    ClassSession.find(sessionQuery).select('sessionId title createdBy batch courses createdAt').sort({ createdAt: -1 }).lean()
   ]);
 
   const filteredSessions = sessions.filter((session) => {
