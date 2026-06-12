@@ -6,7 +6,6 @@ const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
 const ClassAccessRule = require('../models/ClassAccessRule');
 const { generateZoomSignature } = require('../utils/zoomSignature');
-const { logSessionActivity } = require('../utils/sessionLogger');
 const { finalizeAttendanceForActiveSession, recordSessionJoin } = require('../utils/attendanceTracker');
 const { mapRulesByKey, isClassAccessible } = require('../utils/classAccess');
 
@@ -203,14 +202,6 @@ router.post('/join-session', async (req, res) => {
           });
         }
 
-        await logSessionActivity({
-          sessionId: session.sessionId,
-          sessionName: session.title,
-          userName: lmsId,
-          actionPerformed: 'Joined Session',
-          status: 'Success',
-          remarks: `Joined meeting ${session.meetingNumber}`
-        });
       }
     } catch (err) {
       console.warn('Error while recording class join:', err.message);

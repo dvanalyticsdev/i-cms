@@ -4,6 +4,7 @@
  */
 
 const API_BASE_URL = '/api/admin';
+const THEME_STORAGE_KEY = 'icms-admin-theme';
 const attendanceDemoMode = new URLSearchParams(window.location.search).get('attendanceDemo') === '1';
 let authToken = null;
 let currentEditingSessionId = null;
@@ -18,7 +19,7 @@ let deleteTargetCourseId = null;
 let allStudents = [];
 let filteredStudents = [];
 let studentPageMeta = { page: 1, limit: 20, total: 0, totalPages: 1 };
-let studentSearchQuery = { search: '', course: '' };
+let studentSearchQuery = { search: '', course: '', paymentStatus: '' };
 let studentSearchTimer = null;
 let deleteTargetLmsId = null;
 let availableBatches = [];
@@ -96,6 +97,8 @@ const attendanceDemoData = {
 // ====================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    initializeDashboardChrome();
+
     if (attendanceDemoMode) {
         authToken = 'attendance-demo-token';
         availableCourses = Array.from(new Set(attendanceDemoData.sessionSummaries.map(session => session.course).filter(Boolean)));
@@ -105,11 +108,9 @@ document.addEventListener('DOMContentLoaded', () => {
             title: session.sessionName,
             batch: session.batch
         }));
-        const username = document.getElementById('adminUsername');
-        if (username) {
-            username.textContent = 'Attendance Demo';
-        }
+        updateAdminIdentity('Attendance Demo');
         setupEventListeners();
+        syncPageHeader();
         populateAttendanceFilterOptions();
         populateSessionBatchOptions();
         loadAttendanceInsights();
@@ -120,6 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
     restorePendingToast();
     setupEventListeners();
+    syncPageHeader();
     loadCourses(); // Load courses for the form
     loadClassAccessRules();
     loadSessions();
@@ -154,7 +156,88 @@ function checkAuth() {
     }
 
     const username = localStorage.getItem('adminUsername');
-    document.getElementById('adminUsername').textContent = username || 'Admin';
+    updateAdminIdentity(username || 'Admin');
+}
+
+function initializeDashboardChrome() {
+    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY) || document.documentElement.getAttribute('data-theme') || 'dark';
+    applyTheme(savedTheme);
+    updateAdminIdentity(localStorage.getItem('adminUsername') || 'Admin');
+}
+
+function updateAdminIdentity(username) {
+    const adminUsername = document.getElementById('adminUsername');
+    if (adminUsername) {
+        adminUsername.textContent = username;
+    }
+
+    const roleBadge = document.getElementById('adminRoleBadge');
+    if (roleBadge) {
+        roleBadge.textContent = username === 'Attendance Demo' ? 'DEMO' : 'ADMIN';
+    }
+}
+
+function applyTheme(theme) {
+    const nextTheme = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', nextTheme);
+    localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    syncThemeControls(nextTheme);
+}
+
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+}
+
+function syncThemeControls(theme = document.documentElement.getAttribute('data-theme')) {
+    const themeToggle = document.getElementById('themeToggle');
+    const themeLabel = document.getElementById('themeLabel');
+    if (!themeToggle || !themeLabel) {
+        return;
+    }
+
+    const isDark = theme === 'dark';
+    themeToggle.dataset.theme = theme;
+    themeLabel.textContent = isDark ? 'Dark' : 'Light';
+}
+
+function setUtilityMenuOpen(isOpen) {
+    const menu = document.getElementById('utilityMenu');
+    const button = document.getElementById('utilityMenuButton');
+    if (!menu || !button) {
+        return;
+    }
+
+    menu.hidden = !isOpen;
+    button.setAttribute('aria-expanded', String(isOpen));
+}
+
+function setSidebarOpen(isOpen) {
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('appBackdrop');
+    const navToggle = document.getElementById('navToggle');
+    if (!sidebar || !backdrop || !navToggle) {
+        return;
+    }
+
+    sidebar.classList.toggle('open', isOpen);
+    backdrop.classList.toggle('visible', isOpen);
+    navToggle.setAttribute('aria-expanded', String(isOpen));
+    document.body.classList.toggle('nav-open', isOpen);
+}
+
+function syncPageHeader() {
+    const activeTab = document.querySelector('.tab-content.active');
+    const pageTitle = document.getElementById('pageTitle');
+    const pageSubtitle = document.getElementById('pageSubtitle');
+    if (!activeTab || !pageTitle || !pageSubtitle) {
+        return;
+    }
+
+    const title = activeTab.dataset.pageTitle || activeTab.querySelector('.section-title')?.textContent?.trim() || 'Admin Dashboard';
+    const subtitle = activeTab.dataset.pageSubtitle || activeTab.querySelector('.section-subtitle')?.textContent?.trim() || 'Manage classroom operations and review activity.';
+    pageTitle.textContent = title;
+    pageSubtitle.textContent = subtitle;
 }
 
 function restorePendingToast() {
@@ -292,6 +375,7 @@ function setupEventListeners() {
             e.preventDefault();
             const tabName = item.dataset.tab;
             switchTab(tabName);
+            setSidebarOpen(false);
         });
     });
 
@@ -312,12 +396,98 @@ function setupEventListeners() {
         });
     });
 
+    const themeToggle = document.getElementById('themeToggle');
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            toggleTheme();
+        });
+    }
+
+    const utilityMenuButton = document.getElementById('utilityMenuButton');
+    if (utilityMenuButton) {
+        utilityMenuButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const isOpen = utilityMenuButton.getAttribute('aria-expanded') === 'true';
+            setUtilityMenuOpen(!isOpen);
+        });
+    }
+
+    const utilityMenu = document.getElementById('utilityMenu');
+    if (utilityMenu) {
+        utilityMenu.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
+    }
+
+    const navToggle = document.getElementById('navToggle');
+    if (navToggle) {
+        navToggle.addEventListener('click', () => {
+            const isOpen = navToggle.getAttribute('aria-expanded') === 'true';
+            setSidebarOpen(!isOpen);
+        });
+    }
+
+    const appBackdrop = document.getElementById('appBackdrop');
+    if (appBackdrop) {
+        appBackdrop.addEventListener('click', () => {
+            setSidebarOpen(false);
+        });
+    }
+
+    setupClassAccessScrolling();
+
+    document.addEventListener('click', (event) => {
+        const utilityMenu = document.getElementById('utilityMenu');
+        const utilityMenuButton = document.getElementById('utilityMenuButton');
+        if (!utilityMenu || !utilityMenuButton) {
+            return;
+        }
+
+        if (utilityMenu.hidden) {
+            return;
+        }
+
+        if (!utilityMenu.contains(event.target) && !utilityMenuButton.contains(event.target)) {
+            setUtilityMenuOpen(false);
+        }
+    });
+
     // Escape key to close modals
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
+            setUtilityMenuOpen(false);
+            setSidebarOpen(false);
             document.querySelectorAll('.modal').forEach(modal => {
                 modal.classList.add('hidden');
             });
+        }
+    });
+}
+
+function setupClassAccessScrolling() {
+    const scrollRegion = document.getElementById('classAccessScrollRegion');
+
+    if (!scrollRegion) {
+        return;
+    }
+
+    const scrollByAmount = (direction) => {
+        const amount = Math.max(220, Math.floor(scrollRegion.clientWidth * 0.6));
+        scrollRegion.scrollBy({
+            left: direction * amount,
+            behavior: 'smooth'
+        });
+    };
+
+    scrollRegion.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            scrollByAmount(-1);
+        }
+
+        if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            scrollByAmount(1);
         }
     });
 }
@@ -358,6 +528,8 @@ function switchTab(tabName) {
         tab.classList.remove('active');
     });
     document.getElementById(`${tabName}-tab`).classList.add('active');
+    syncPageHeader();
+    setUtilityMenuOpen(false);
 
     if (tabName === 'courses') {
         loadCourses();
@@ -435,20 +607,30 @@ function renderClassAccessRules() {
         return;
     }
 
-    body.innerHTML = classAccessRules.map((rule, ruleIndex) => `
-        <tr>
-            <td class="class-access-sticky class-access-sticky-left class-access-label-cell">${escapeHtml(rule.course || '-')}</td>
-            <td class="class-access-sticky class-access-sticky-left-2 class-access-label-cell">${escapeHtml(rule.paymentStatus || 'DEFAULT')}</td>
-            ${columns.map((className) => `
-                <td class="class-access-rule-cell">
-                    <select class="form-input class-access-select" aria-label="${escapeHtml(rule.course || '')} ${escapeHtml(rule.paymentStatus || '')} ${escapeHtml(className)}" data-rule-index="${ruleIndex}" data-class-name="${escapeHtml(className)}">
-                        <option value="false" ${rule.accessMap?.[className] ? '' : 'selected'}>No</option>
-                        <option value="true" ${rule.accessMap?.[className] ? 'selected' : ''}>Yes</option>
-                    </select>
-                </td>
-            `).join('')}
-        </tr>
-    `).join('');
+    body.innerHTML = classAccessRules.map((rule, ruleIndex) => {
+        const accessMap = rule.accessMap || {};
+
+        return `
+            <tr>
+                <td class="class-access-sticky class-access-sticky-left class-access-label-cell">${escapeHtml(rule.course || '-')}</td>
+                <td class="class-access-sticky class-access-sticky-left-2 class-access-label-cell">${escapeHtml(rule.paymentStatus || 'DEFAULT')}</td>
+                ${columns.map((className) => {
+                    const hasValue = Object.prototype.hasOwnProperty.call(accessMap, className);
+                    const accessValue = accessMap[className];
+
+                    return `
+                        <td class="class-access-rule-cell">
+                            <select class="form-input class-access-select" aria-label="${escapeHtml(rule.course || '')} ${escapeHtml(rule.paymentStatus || '')} ${escapeHtml(className)}" data-rule-index="${ruleIndex}" data-class-name="${escapeHtml(className)}">
+                                <option value="unset" ${hasValue ? '' : 'selected'}>Not set</option>
+                                <option value="false" ${hasValue && accessValue === false ? 'selected' : ''}>No</option>
+                                <option value="true" ${hasValue && accessValue === true ? 'selected' : ''}>Yes</option>
+                            </select>
+                        </td>
+                    `;
+                }).join('')}
+            </tr>
+        `;
+    }).join('');
 }
 
 function normalizeClassName(value) {
@@ -477,13 +659,6 @@ function addClassColumn() {
     }
 
     availableClassNames = [...availableClassNames, className].sort((left, right) => left.localeCompare(right));
-    classAccessRules = classAccessRules.map(rule => ({
-        ...rule,
-        accessMap: {
-            ...(rule.accessMap || {}),
-            [className]: false
-        }
-    }));
 
     input.value = '';
     renderClassAccessRules();
@@ -522,6 +697,11 @@ async function saveClassAccessRules() {
         const payload = classAccessRules.map((rule, ruleIndex) => {
             const nextAccessMap = { ...(rule.accessMap || {}) };
             document.querySelectorAll(`[data-rule-index="${ruleIndex}"]`).forEach(input => {
+                if (input.value === 'unset') {
+                    delete nextAccessMap[input.dataset.className];
+                    return;
+                }
+
                 nextAccessMap[input.dataset.className] = input.value === 'true';
             });
 
@@ -619,7 +799,7 @@ function renderSessions() {
         return `
         <tr>
             <td>${escapeHtml(session.title)}</td>
-            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${session.meetingNumber}</code></td>
+            <td>${renderCodeChip(session.meetingNumber)}</td>
             <td>${escapeHtml(session.className || '-')}<br><span style="color: #999; font-size: 12px;">${batchDisplay} | ${courseDisplay}</span></td>
             <td>${escapeHtml(session.mentorName || '-')}</td>
             <td>
@@ -729,7 +909,7 @@ async function handleSaveSession(event) {
     const courses = getSelectedCourses();
 
     // Validation
-    if (!title || !meetingNumber || !passcode || !batch || !mentorName || !className) {
+    if (!title || !meetingNumber || !passcode || !batch || !mentorName || !className || courses.length === 0) {
         showToast('Please fill in all required fields', 'error');
         return;
     }
@@ -1463,7 +1643,7 @@ function renderGuestIds() {
 
     guestIdsList.innerHTML = allGuestIds.map(id => `
         <tr>
-            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${id.id}</code></td>
+            <td>${renderCodeChip(id.id)}</td>
             <td>
                 <span class="status-badge ${id.status.toLowerCase()}">
                     ${id.status}
@@ -1502,7 +1682,7 @@ function renderMentorIds() {
 
     mentorIdsList.innerHTML = allMentorIds.map(id => `
         <tr>
-            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${id.id}</code></td>
+            <td>${renderCodeChip(id.id)}</td>
             <td>
                 <span class="status-badge ${id.status.toLowerCase()}">
                     ${id.status}
@@ -1591,7 +1771,7 @@ function renderMockInterviewIds() {
 
     mockInterviewIdsList.innerHTML = allMockInterviewIds.map(id => `
         <tr>
-            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${id.id}</code></td>
+            <td>${renderCodeChip(id.id)}</td>
             <td>
                 <span class="status-badge ${id.status.toLowerCase()}">
                     ${id.status}
@@ -1830,8 +2010,9 @@ async function loadStudents(page = 1) {
         studentPageMeta.page = page;
         const searchVal = studentSearchQuery.search || '';
         const courseVal = studentSearchQuery.course || '';
-        
-        const url = `${API_BASE_URL}/students?page=${page}&limit=${studentPageMeta.limit}&search=${encodeURIComponent(searchVal)}&course=${encodeURIComponent(courseVal)}`;
+        const paymentStatusVal = studentSearchQuery.paymentStatus || '';
+
+        const url = `${API_BASE_URL}/students?page=${page}&limit=${studentPageMeta.limit}&search=${encodeURIComponent(searchVal)}&course=${encodeURIComponent(courseVal)}&paymentStatus=${encodeURIComponent(paymentStatusVal)}`;
         
         const response = await fetch(url, {
             headers: {
@@ -1983,7 +2164,7 @@ function renderIssues() {
 
     issuesList.innerHTML = allIssues.map(issue => `
         <tr>
-            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(issue.lmsId)}</code></td>
+            <td>${renderCodeChip(issue.lmsId)}</td>
             <td>${escapeHtml(issue.name)}</td>
             <td>${issue.phoneNumber ? escapeHtml(issue.phoneNumber) : '-'}</td>
             <td><div class="issue-description">${escapeHtml(issue.description)}</div></td>
@@ -2082,7 +2263,7 @@ function renderStudents() {
 
     studentsList.innerHTML = filteredStudents.map(student => `
         <tr>
-            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(student.lmsId)}</code></td>
+            <td>${renderCodeChip(student.lmsId)}</td>
             <td>${escapeHtml(student.name)}</td>
             <td>${escapeHtml(student.mobile || '-')}</td>
             <td>${escapeHtml(student.emailId || '-')}</td>
@@ -2139,9 +2320,11 @@ function filterAndSearchStudents() {
     studentSearchTimer = setTimeout(() => {
         const searchTerm = document.getElementById('studentSearch').value.trim();
         const selectedCourse = document.getElementById('studentCourseFilter').value;
+        const selectedPaymentStatus = document.getElementById('studentPaymentFilter').value;
 
         studentSearchQuery.search = searchTerm;
         studentSearchQuery.course = selectedCourse;
+        studentSearchQuery.paymentStatus = selectedPaymentStatus;
 
         loadStudents(1);
     }, 250);
@@ -2153,8 +2336,10 @@ function filterAndSearchStudents() {
 function resetStudentFilters() {
     document.getElementById('studentSearch').value = '';
     document.getElementById('studentCourseFilter').value = '';
+    document.getElementById('studentPaymentFilter').value = '';
     studentSearchQuery.search = '';
     studentSearchQuery.course = '';
+    studentSearchQuery.paymentStatus = '';
     loadStudents(1);
 }
 
@@ -2794,7 +2979,7 @@ function renderAttendanceDetailTable() {
 
     detailList.innerHTML = records.map(record => `
         <tr>
-            <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(record.lmsId)}</code></td>
+            <td>${renderCodeChip(record.lmsId)}</td>
             <td>${escapeHtml(record.studentName || '-')}</td>
             <td>${escapeHtml(record.mobile || record.phoneNumber || '-')}</td>
             <td>${escapeHtml(record.mentorName || session.mentorName || '-')}</td>
@@ -2908,7 +3093,7 @@ function renderAttendanceRoster() {
     } else {
         rosterList.innerHTML = records.map(student => `
             <tr>
-                <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(student.lmsId)}</code></td>
+                <td>${renderCodeChip(student.lmsId)}</td>
                 <td>${escapeHtml(student.name || '-')}</td>
                 <td>${escapeHtml(student.mobile || student.phoneNumber || '-')}</td>
                 <td>${escapeHtml(student.course || '-')}</td>
@@ -3102,4 +3287,8 @@ function escapeHtml(text) {
         "'": '&#039;'
     };
     return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+function renderCodeChip(value) {
+    return `<code class="data-chip">${escapeHtml(value || '-')}</code>`;
 }

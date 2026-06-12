@@ -8,6 +8,7 @@
 // ====================================
 
 const API_BASE_URL = '/api';
+const STUDENT_THEME_STORAGE_KEY = 'icms-student-theme';
 let deviceToken = null;
 let currentSession = null;
 let forceLoginMode = false;
@@ -24,6 +25,7 @@ let sessionHeartbeatInterval = null; // Polling timer to detect remote session r
  * Initialize the application on page load
  */
 document.addEventListener('DOMContentLoaded', () => {
+  initializeTheme();
   generateDeviceToken();
   checkExistingSession();
   setupEventListeners();
@@ -159,6 +161,32 @@ function setupEventListeners() {
       closeAllModals();
     }
   });
+
+  document.querySelectorAll('[data-theme-toggle]').forEach(button => {
+    button.addEventListener('click', toggleTheme);
+  });
+}
+
+function initializeTheme() {
+  const savedTheme = localStorage.getItem(STUDENT_THEME_STORAGE_KEY) || document.documentElement.getAttribute('data-theme') || 'dark';
+  applyTheme(savedTheme);
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', nextTheme);
+  localStorage.setItem(STUDENT_THEME_STORAGE_KEY, nextTheme);
+  document.querySelectorAll('.theme-toggle-label').forEach(label => {
+    label.textContent = nextTheme === 'dark' ? 'Dark' : 'Light';
+  });
+  document.querySelectorAll('[data-theme-toggle]').forEach(button => {
+    button.dataset.theme = nextTheme;
+  });
+}
+
+function toggleTheme() {
+  const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
 }
 
 // ====================================

@@ -7,6 +7,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+        (() => {
+            const savedTheme = localStorage.getItem('icms-admin-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
     <style>
         * {
             margin: 0;
@@ -14,24 +20,140 @@
             box-sizing: border-box;
         }
 
+        :root {
+            --bg: #ffffff;
+            --surface: #ffffff;
+            --surface-muted: #fafafa;
+            --border: #e8e8e8;
+            --text: #000000;
+            --text-muted: #5f6775;
+            --heading: #000000;
+            --primary: #e05322;
+            --primary-soft: rgba(224, 83, 34, 0.08);
+            --danger: #df514c;
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.09);
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+            --overlay: rgba(0, 0, 0, 0.04);
+            --radius: 4px;
+        }
+
+        html[data-theme="dark"] {
+            --bg: #161922;
+            --surface: #191c24;
+            --surface-muted: #212431;
+            --border: #2d323f;
+            --text: #cbd5e1;
+            --text-muted: #8e9db0;
+            --heading: #ffffff;
+            --primary: #f05a28;
+            --primary-soft: rgba(240, 90, 40, 0.1);
+            --danger: #ff5722;
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 12px 36px rgba(0, 0, 0, 0.45);
+            --overlay: rgba(255, 255, 255, 0.02);
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background:
+                radial-gradient(circle at top left, var(--overlay), transparent 40%),
+                linear-gradient(180deg, var(--bg), var(--bg));
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 20px;
+            color: var(--text);
+            position: relative;
         }
 
         .login-container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-md);
             width: 100%;
             max-width: 400px;
             padding: 40px;
             animation: slideUp 0.3s ease;
+        }
+
+        .login-topbar {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+        }
+
+        .theme-toggle {
+            border: 0;
+            background: transparent;
+            padding: 0;
+        }
+
+        .theme-row {
+            display: inline-flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--surface);
+            color: var(--text);
+            font: inherit;
+            cursor: pointer;
+            text-align: left;
+            transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+        }
+
+        .theme-row:hover,
+        .theme-row:focus-visible {
+            border-color: var(--primary);
+            background: var(--primary-soft);
+            outline: none;
+        }
+
+        .theme-row-label {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .theme-row-label strong {
+            font-size: 15px;
+            color: var(--heading);
+        }
+
+        .theme-row-label small {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .theme-switch {
+            width: 58px;
+            height: 32px;
+            flex: 0 0 58px;
+            border-radius: 999px;
+            background: var(--border);
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            padding: 4px;
+        }
+
+        .theme-switch-thumb {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--surface);
+            box-shadow: var(--shadow-sm);
+            transform: translateX(0);
+            transition: transform 0.2s ease;
+        }
+
+        html[data-theme="dark"] .theme-switch-thumb {
+            transform: translateX(26px);
         }
 
         @keyframes slideUp {
@@ -106,25 +228,25 @@
           font-size: 0.65rem;
           font-weight: 600;
           letter-spacing: 0.08em;
-          color: #666;
+          color: var(--text-muted);
         }
         .icms-dv-img {
           width: 64px;
           height: auto;
           display: block;
-          filter: drop-shadow(1px 0 0 #fff) drop-shadow(-1px 0 0 #fff) drop-shadow(0 1px 0 #fff) drop-shadow(0 -1px 0 #fff);
+          filter: none;
         }
 
         .login-title {
             font-size: 24px;
             font-weight: 700;
-            color: #333;
+            color: var(--heading);
             margin-bottom: 8px;
         }
 
         .login-subtitle {
             font-size: 14px;
-            color: #666;
+            color: var(--text-muted);
         }
 
         .form-group {
@@ -133,43 +255,47 @@
 
         .form-label {
             display: block;
-            font-size: 14px;
-            font-weight: 600;
-            color: #333;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-muted);
             margin-bottom: 8px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
         }
 
         .form-input {
             width: 100%;
             padding: 12px 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 6px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
             font-size: 14px;
             font-family: inherit;
-            transition: border-color 0.3s ease;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+            background: var(--bg);
+            color: var(--text);
         }
 
         .form-input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(224, 83, 34, 0.15);
         }
 
         .form-input::placeholder {
-            color: #999;
+            color: var(--text-muted);
         }
 
         .submit-btn {
             width: 100%;
             padding: 12px 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--primary);
             color: white;
-            border: none;
-            border-radius: 6px;
+            border: 1px solid transparent;
+            border-radius: var(--radius);
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: background-color 0.3s ease;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -178,8 +304,7 @@
         }
 
         .submit-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+            background: #d54b1d;
         }
 
         .submit-btn:active {
@@ -207,11 +332,11 @@
         }
 
         .error-message {
-            background: #fee;
-            border: 1px solid #fcc;
-            color: #c33;
+            background: rgba(223, 81, 76, 0.08);
+            border: 1px solid rgba(223, 81, 76, 0.18);
+            color: var(--danger);
             padding: 12px;
-            border-radius: 6px;
+            border-radius: var(--radius);
             font-size: 14px;
             margin-bottom: 20px;
             display: none;
@@ -237,13 +362,13 @@
             text-align: center;
             margin-top: 30px;
             padding-top: 20px;
-            border-top: 1px solid #e0e0e0;
+            border-top: 1px solid var(--border);
             font-size: 12px;
-            color: #999;
+            color: var(--text-muted);
         }
 
         .login-footer a {
-            color: #667eea;
+            color: var(--primary);
             text-decoration: none;
         }
 
@@ -270,6 +395,17 @@
 </head>
 <body>
     <div class="login-container">
+        <div class="login-topbar">
+            <button type="button" class="theme-toggle theme-row" id="themeToggle" aria-label="Toggle theme">
+                <span class="theme-switch" aria-hidden="true">
+                    <span class="theme-switch-thumb"></span>
+                </span>
+                <span class="theme-row-label">
+                    <strong id="themeToggleLabel">Dark</strong>
+                    <small>Switch theme</small>
+                </span>
+            </button>
+        </div>
         <div class="login-header">
             <div class="login-logo">
                 <div class="icms-logo-wrap">
@@ -325,6 +461,22 @@
 
     <script>
         const API_BASE_URL = '/api/admin';
+        const THEME_STORAGE_KEY = 'icms-admin-theme';
+
+        function applyTheme(theme) {
+            const nextTheme = theme === 'light' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', nextTheme);
+            localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+            const label = document.getElementById('themeToggleLabel');
+            if (label) {
+                label.textContent = nextTheme === 'dark' ? 'Dark' : 'Light';
+            }
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+            applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+        }
 
         /**
          * Handle admin login
@@ -394,6 +546,9 @@
             errorMessage.textContent = message;
             errorMessage.classList.add('show');
         }
+
+        applyTheme(document.documentElement.getAttribute('data-theme'));
+        document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
 
         // Check if already logged in
         if (localStorage.getItem('adminToken')) {

@@ -7,12 +7,29 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+        (() => {
+            const savedTheme = localStorage.getItem('icms-student-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <!-- Hero Section -->
     <section class="hero">
         <div class="hero-content">
+            <div class="hero-toolbar">
+                <button type="button" class="theme-toggle theme-row" data-theme-toggle aria-label="Toggle theme">
+                    <span class="theme-switch" aria-hidden="true">
+                        <span class="theme-switch-thumb"></span>
+                    </span>
+                    <span class="theme-row-label">
+                        <strong class="theme-toggle-label">Dark</strong>
+                        <small>Switch theme</small>
+                    </span>
+                </button>
+            </div>
             <div class="hero-logo">
                 <div class="icms-logo-wrap icms-logo--brand">
                     <div class="icms-text-wrap">
@@ -60,6 +77,15 @@
                 </div>
             </div>
                <div class="sessions-header-actions">
+                   <button type="button" class="theme-toggle theme-toggle-compact theme-row" data-theme-toggle aria-label="Toggle theme">
+                       <span class="theme-switch" aria-hidden="true">
+                           <span class="theme-switch-thumb"></span>
+                       </span>
+                       <span class="theme-row-label">
+                           <strong class="theme-toggle-label">Dark</strong>
+                           <small>Switch theme</small>
+                       </span>
+                   </button>
                    <button class="btn btn-secondary" onclick="openIssueModal()">Report Issue</button>
                    <button class="btn-logout" onclick="logoutSession()">Logout</button>
                </div>

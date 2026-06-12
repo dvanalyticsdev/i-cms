@@ -7,13 +7,22 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+        (() => {
+            const savedTheme = localStorage.getItem('icms-admin-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
     <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
-    <!-- Header -->
-    <header class="header">
-        <div class="header-container">
-            <div class="header-logo">
+    <a class="skip-link" href="#mainContent">Skip to content</a>
+    <div class="app-shell">
+        <button type="button" class="app-backdrop" id="appBackdrop" aria-hidden="true"></button>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+            <div class="sidebar-brand">
                 <div class="icms-logo-wrap">
                     <div class="icms-text-wrap">
                         <span class="icms-logo-text">i-CMS</span>
@@ -24,18 +33,7 @@
                     </div>
                 </div>
             </div>
-            <div class="header-actions">
-                <span class="user-info">
-                    <span id="adminUsername">Admin</span>
-                </span>
-                <button class="btn-logout" onclick="handleLogout()">Logout</button>
-            </div>
-        </div>
-    </header>
-
-    <!-- Sidebar -->
-    <aside class="sidebar">
-        <nav class="sidebar-nav">
+            <nav class="sidebar-nav">
             <a href="#sessions" class="nav-item active" data-tab="sessions">
                 <span class="nav-text">Sessions</span>
             </a>
@@ -60,18 +58,78 @@
             <a href="#issue-section" class="nav-item" data-tab="issue-section">
                 <span class="nav-text">Issue Section</span>
             </a>
-        </nav>
-    </aside>
+            </nav>
+        </aside>
 
-    <!-- Main Content -->
-    <main class="main-content">
-        <!-- Sessions Tab -->
-        <section id="sessions-tab" class="tab-content active">
-            <div class="section-header">
-                <div>
-                    <h2 class="section-title">Class Sessions</h2>
-                    <p class="section-subtitle">Create and manage classroom sessions</p>
+        <div class="content-shell">
+            <header class="topbar" aria-label="Dashboard header">
+                <div class="topbar-intro">
+                    <p class="topbar-kicker">Admin Workspace</p>
+                    <h1 class="topbar-title" id="pageTitle">Class Sessions</h1>
+                    <p class="topbar-subtitle" id="pageSubtitle">Create and manage classroom sessions</p>
                 </div>
+                <div class="topbar-actions">
+                    <span class="role-badge" id="adminRoleBadge">Admin</span>
+                    <button
+                        type="button"
+                        class="icon-button menu-button"
+                        id="utilityMenuButton"
+                        aria-haspopup="menu"
+                        aria-expanded="false"
+                        aria-controls="utilityMenu"
+                        title="Open dashboard menu"
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                            <path d="M4 7h16"></path>
+                            <path d="M4 12h16"></path>
+                            <path d="M4 17h16"></path>
+                        </svg>
+                    </button>
+                    <button
+                        type="button"
+                        class="icon-button nav-toggle"
+                        id="navToggle"
+                        aria-haspopup="dialog"
+                        aria-expanded="false"
+                        aria-controls="sidebar"
+                        title="Open navigation"
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                            <path d="M4 7h16"></path>
+                            <path d="M4 12h16"></path>
+                            <path d="M4 17h16"></path>
+                        </svg>
+                    </button>
+                    <div class="utility-menu" id="utilityMenu" role="menu" aria-labelledby="utilityMenuButton" hidden>
+                        <div class="utility-menu-user">
+                            <span class="utility-menu-name" id="adminUsername">Admin</span>
+                            <span class="utility-menu-role">Administrator</span>
+                        </div>
+                        <div class="utility-menu-section">
+                            <button type="button" class="utility-row theme-row" id="themeToggle" role="menuitem">
+                                <span class="theme-switch" aria-hidden="true">
+                                    <span class="theme-switch-thumb"></span>
+                                </span>
+                                <span class="theme-row-label">
+                                    <strong id="themeLabel">Light</strong>
+                                    <small>Switch workspace theme</small>
+                                </span>
+                            </button>
+                        </div>
+                        <div class="utility-menu-section">
+                            <button type="button" class="utility-row utility-row-danger" onclick="handleLogout()" role="menuitem">
+                                <span>Log out</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main Content -->
+            <main class="main-content" id="mainContent">
+        <!-- Sessions Tab -->
+        <section id="sessions-tab" class="tab-content active page-section" data-page-title="Class Sessions" data-page-subtitle="Create and manage classroom sessions">
+            <div class="section-header page-section-header">
                 <button class="btn btn-primary" onclick="openCreateSessionModal()">
                     <span>Create Session</span>
                 </button>
@@ -120,12 +178,8 @@
         </section>
 
         <!-- Course Management Tab -->
-        <section id="courses-tab" class="tab-content">
-            <div class="section-header">
-                <div>
-                    <h2 class="section-title">Course Management</h2>
-                    <p class="section-subtitle">Create, edit, and manage course metadata</p>
-                </div>
+        <section id="courses-tab" class="tab-content page-section" data-page-title="Course Management" data-page-subtitle="Create, edit, and manage course metadata">
+            <div class="section-header page-section-header">
                 <button class="btn btn-primary" onclick="openCreateCourseModal()">
                     <span>Add Course</span>
                 </button>
@@ -176,12 +230,8 @@
         </section>
 
         <!-- Class Access Management Tab -->
-        <section id="class-access-tab" class="tab-content">
-            <div class="section-header">
-                <div>
-                    <h2 class="section-title">Class Access Management</h2>
-                    <p class="section-subtitle">Control class eligibility by course and payment status.</p>
-                </div>
+        <section id="class-access-tab" class="tab-content page-section" data-page-title="Class Access Management" data-page-subtitle="Control class eligibility by course and payment status.">
+            <div class="section-header page-section-header">
                 <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                     <button class="btn btn-primary" onclick="saveClassAccessRules()">Save Rules</button>
                 </div>
@@ -201,8 +251,18 @@
             </div>
 
             <div class="table-meta" id="classAccessMeta">Loading class access rules...</div>
+            <div class="class-access-scroll-toolbar" aria-label="Class access horizontal scroll help">
+                <p class="class-access-scroll-hint">Focus the table and press Left or Right arrow keys, or use a trackpad or mouse wheel with shift, to move across class columns.</p>
+            </div>
 
-            <div class="table-container class-access-table-container">
+            <div
+                class="table-container class-access-table-container"
+                id="classAccessScrollRegion"
+                tabindex="0"
+                role="region"
+                aria-label="Class access matrix"
+                aria-describedby="classAccessMeta"
+            >
                 <table class="table class-access-table" id="classAccessTable">
                     <thead id="classAccessHead"></thead>
                     <tbody id="classAccessList">
@@ -218,12 +278,8 @@
         </section>
 
         <!-- Session Logs Tab -->
-        <section id="session-logs-tab" class="tab-content">
-            <div class="section-header">
-                <div>
-                    <h2 class="section-title">Session Logs</h2>
-                    <p class="section-subtitle">Track and review class session activity in real time</p>
-                </div>
+        <section id="session-logs-tab" class="tab-content page-section" data-page-title="Session Logs" data-page-subtitle="Track and review class session activity in real time">
+            <div class="section-header page-section-header">
                 <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                     <button class="btn btn-danger" onclick="clearSessionLogs()">
                         <span>Clear Log</span>
@@ -248,7 +304,6 @@
                     <option value="Updated Session">Updated Session</option>
                     <option value="Session Status Updated">Session Status Updated</option>
                     <option value="Deleted Session">Deleted Session</option>
-                    <option value="Joined Session">Joined Session</option>
                 </select>
                 <select id="sessionLogSortBy" class="form-input table-toolbar-select" onchange="loadSessionLogs(1)">
                     <option value="timestamp">Sort: Timestamp</option>
@@ -299,12 +354,8 @@
         </section>
 
         <!-- ID Management Tab -->
-        <section id="id-management-tab" class="tab-content">
-            <div class="section-header">
-                <div>
-                    <h2 class="section-title">ID Management</h2>
-                    <p class="section-subtitle">Manage Guest and Mentor IDs for non-LMS users</p>
-                </div>
+        <section id="id-management-tab" class="tab-content page-section" data-page-title="ID Management" data-page-subtitle="Manage Guest and Mentor IDs for non-LMS users">
+            <div class="section-header page-section-header">
                 <button class="btn btn-secondary" onclick="refreshIdManagement()" title="Refresh">
                     <span>🔄 Refresh</span>
                 </button>
@@ -436,12 +487,8 @@
         </section>
 
         <!-- Student Database Tab -->
-        <section id="student-database-tab" class="tab-content">
-            <div class="section-header">
-                <div>
-                    <h2 class="section-title">Student Database</h2>
-                    <p class="section-subtitle">View and manage all students</p>
-                </div>
+        <section id="student-database-tab" class="tab-content page-section" data-page-title="Student Database" data-page-subtitle="View and manage all students">
+            <div class="section-header page-section-header">
                 <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                     <button class="btn btn-secondary" onclick="openExportDatabaseModal('students')">
                         <span>Export Student Database</span>
@@ -461,28 +508,34 @@
             </div>
 
             <!-- Search and Filter -->
-            <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 250px;">
+            <div class="table-toolbar table-toolbar-wrap student-filter-toolbar">
+                <div class="table-toolbar-search">
                     <input
                         type="text"
                         id="studentSearch"
                         class="form-input"
                         placeholder="Search by LMS ID, Name, Mobile, Email, or Payment..."
-                        style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"
                         onkeyup="filterAndSearchStudents()"
                     >
                 </div>
-                <div style="min-width: 200px;">
+                <div class="table-toolbar-select student-filter-select">
                     <select
                         id="studentCourseFilter"
                         class="form-input"
-                        style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"
                         onchange="filterAndSearchStudents()"
                     >
                         <option value="">All Courses</option>
                     </select>
                 </div>
-                <button class="btn btn-secondary" onclick="resetStudentFilters()" style="padding: 10px 15px;">
+                <div class="table-toolbar-select student-filter-select">
+                    <select id="studentPaymentFilter" class="form-input" onchange="filterAndSearchStudents()">
+                        <option value="">All Payments</option>
+                        <option value="DEFAULT">Default</option>
+                        <option value="FULLY PAID">Fully Paid</option>
+                        <option value="PENDING">Pending</option>
+                    </select>
+                </div>
+                <button class="btn btn-secondary" onclick="resetStudentFilters()">
                     <span>Reset</span>
                 </button>
             </div>
@@ -505,7 +558,7 @@
                     </thead>
                     <tbody id="studentsList">
                         <tr class="loading-row">
-                            <td colspan="8" style="text-align: center; padding: 40px;">
+                            <td colspan="9" style="text-align: center; padding: 40px;">
                                 <div class="spinner"></div>
                                 <p>Loading students...</p>
                             </td>
@@ -517,12 +570,8 @@
         </section>
 
         <!-- Attendance Tab -->
-        <section id="attendance-insights-tab" class="tab-content">
-            <div class="section-header">
-                <div>
-                    <h2 class="section-title">Attendance</h2>
-                    <p class="section-subtitle">Browse sessions and review who joined each one.</p>
-                </div>
+        <section id="attendance-insights-tab" class="tab-content page-section" data-page-title="Attendance" data-page-subtitle="Browse sessions and review who joined each one.">
+            <div class="section-header page-section-header">
                 <button class="btn btn-primary" onclick="loadAttendanceInsights()">Refresh Attendance</button>
             </div>
 
@@ -676,12 +725,8 @@
         </section>
 
         <!-- Issue Section Tab -->
-        <section id="issue-section-tab" class="tab-content">
-            <div class="section-header">
-                <div>
-                    <h2 class="section-title">Issue Section</h2>
-                    <p class="section-subtitle">Review issues reported from the login page and remove them after resolution</p>
-                </div>
+        <section id="issue-section-tab" class="tab-content page-section" data-page-title="Issue Section" data-page-subtitle="Review issues reported from the login page and remove them after resolution">
+            <div class="section-header page-section-header">
                 <button class="btn btn-secondary" onclick="loadIssues()" title="Refresh issues">
                     <span>🔄 Refresh</span>
                 </button>
@@ -795,11 +840,11 @@
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Legacy Course Filter (Optional)</label>
+                        <label class="form-label">Course Selection *</label>
                         <div id="coursesContainer" class="courses-container">
                             <p style="color: #999; font-size: 12px;">Loading courses...</p>
                         </div>
-                        <small class="form-hint">Leave empty to rely fully on Class Access Management rules.</small>
+                        <small class="form-hint">Select the course or courses that should be allowed for this session.</small>
                     </div>
 
                     <div class="form-group">
@@ -1138,7 +1183,11 @@
         </div>
     </div>
 
-    <div id="toast" class="toast hidden"></div>
+            </main>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
     <script src="dashboard.js"></script>
 </body>

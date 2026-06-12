@@ -5,7 +5,6 @@ const ActiveSession = require('../models/ActiveSession');
 const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
 const AttendanceRecord = require('../models/AttendanceRecord');
-const { logSessionActivity } = require('../utils/sessionLogger');
 const { sanitizeLmsId } = require('../utils/studentValidation');
 const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
 const { findStudentInWorkbook } = require('../utils/workbookSync');
@@ -75,16 +74,6 @@ router.post('/verify-student', async (req, res) => {
     }
 
     if (!isValid) {
-      if (!isGuestMentorId) {
-        await logSessionActivity({
-          sessionName: 'Student Login',
-          userName: sanitizedLmsId,
-          actionPerformed: 'Verify Login Attempt',
-          status: 'Failed',
-          remarks: 'Invalid LMS ID'
-        });
-      }
-
       return res.status(401).json({
         success: false,
         message: 'We were unable to verify your details. Please contact the Program Department for assistance at 9611276828 or 8904250708.'
@@ -92,14 +81,6 @@ router.post('/verify-student', async (req, res) => {
     }
 
     if (!isGuestMentorId && resolvePaymentStatus(userInfo, sanitizedLmsId) === 'DEFAULT') {
-      await logSessionActivity({
-        sessionName: 'Student Login',
-        userName: sanitizedLmsId,
-        actionPerformed: 'Verify Login Attempt',
-        status: 'Failed',
-        remarks: 'Login blocked due to default payment status'
-      });
-
       return res.status(403).json({
         success: false,
         feePending: true,
@@ -140,16 +121,6 @@ router.post('/verify-student', async (req, res) => {
     });
     
     await newActiveSession.save();
-
-    if (!isGuestMentorId) {
-      await logSessionActivity({
-        sessionName: 'Student Login',
-        userName: sanitizedLmsId,
-        actionPerformed: 'Verified Login',
-        status: 'Success',
-        remarks: 'LMS ID validated successfully'
-      });
-    }
 
     return res.status(200).json({
       success: true,

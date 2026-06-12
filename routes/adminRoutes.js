@@ -14,6 +14,8 @@ const { logSessionActivity } = require('../utils/sessionLogger');
 const { sanitizeLmsId } = require('../utils/studentValidation');
 const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
 const { normalizePaymentStatus } = require('../utils/classAccess');
+const CLASS_ACCESS_PAYMENT_STATUSES = ['DEFAULT', 'FULLY PAID', 'PENDING'];
+const SESSION_LOG_ALLOWED_ACTIONS = ['Created Session', 'Updated Session', 'Session Status Updated', 'Deleted Session'];
 const { syncWorkbookData } = require('../utils/workbookSync');
 const XLSX = require('xlsx');
 const crypto = require('crypto');
@@ -109,7 +111,9 @@ async function getAllowedCourseNames() {
 
 async function validateSelectedCourses(courses) {
   if (!courses || courses.length === 0) {
-    return [];
+    const error = new Error('At least one course must be selected');
+    error.status = 400;
+    throw error;
   }
 
   const allowedCourseNames = await getAllowedCourseNames();
@@ -138,6 +142,43 @@ async function getClassCatalog() {
   });
 
   return Array.from(classNames).sort();
+}
+
+async function ensureClassAccessRulesForCourses(courseNames = []) {
+  const normalizedCourseNames = Array.from(
+    new Set(
+      courseNames
+        .map((courseName) => normalizeText(courseName))
+        .filter(Boolean)
+    )
+  );
+
+  if (normalizedCourseNames.length === 0) {
+    return;
+  }
+
+  await ClassAccessRule.bulkWrite(
+    normalizedCourseNames.flatMap((courseName) =>
+      CLASS_ACCESS_PAYMENT_STATUSES.map((paymentStatus) => ({
+        updateOne: {
+          filter: { course: courseName, paymentStatus },
+          update: {
+            $setOnInsert: {
+              accessMap: {},
+              source: 'dashboard'
+            }
+          },
+          upsert: true
+        }
+      }))
+    ),
+    { ordered: false }
+  );
+}
+
+async function ensureClassAccessRulesForAllCourses() {
+  const courses = await Course.find({}, { courseName: 1 }).lean();
+  await ensureClassAccessRulesForCourses(courses.map((course) => course.courseName));
 }
 
 /**
@@ -199,24 +240,30 @@ router.get('/session-logs', authMiddleware, async (req, res) => {
       : 'timestamp';
     const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
 
-    const query = {};
+    const query = {
+      actionPerformed: { $in: SESSION_LOG_ALLOWED_ACTIONS }
+    };
 
     if (status) {
       query.status = new RegExp(`^${status.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
     }
 
     if (action) {
-      query.actionPerformed = new RegExp(action.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      if (SESSION_LOG_ALLOWED_ACTIONS.includes(action)) {
+        query.actionPerformed = action;
+      }
     }
 
     if (search) {
       const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      query.$or = [
-        { sessionName: new RegExp(escapedSearch, 'i') },
-        { userName: new RegExp(escapedSearch, 'i') },
-        { actionPerformed: new RegExp(escapedSearch, 'i') },
-        { remarks: new RegExp(escapedSearch, 'i') }
-      ];
+      query.$and = [{
+        $or: [
+          { sessionName: new RegExp(escapedSearch, 'i') },
+          { userName: new RegExp(escapedSearch, 'i') },
+          { actionPerformed: new RegExp(escapedSearch, 'i') },
+          { remarks: new RegExp(escapedSearch, 'i') }
+        ]
+      }];
     }
 
     const total = await SessionLog.countDocuments(query);
@@ -621,6 +668,7 @@ router.get('/class-access-rules', authMiddleware, async (req, res) => {
       return;
     }
 
+    await ensureClassAccessRulesForAllCourses();
     const rules = await ClassAccessRule.find({}).sort({ course: 1, paymentStatus: 1 }).lean();
     const classNames = await getClassCatalog();
 
@@ -726,6 +774,7 @@ router.post('/courses', authMiddleware, async (req, res) => {
     });
 
     await newCourse.save();
+    await ensureClassAccessRulesForCourses([newCourse.courseName]);
 
     return res.status(201).json({ success: true, message: 'Course created successfully', course: newCourse });
   } catch (error) {
@@ -788,6 +837,8 @@ router.delete('/courses/:id', authMiddleware, async (req, res) => {
     if (!deletedCourse) {
       return res.status(404).json({ success: false, message: 'Course not found' });
     }
+
+    await ClassAccessRule.deleteMany({ course: deletedCourse.courseName });
 
     return res.status(200).json({ success: true, message: 'Course deleted successfully', course: deletedCourse });
   } catch (error) {
@@ -1092,11 +1143,16 @@ router.get('/students', authMiddleware, async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
     const search = req.query.search ? String(req.query.search).trim() : '';
     const course = req.query.course ? String(req.query.course).trim() : '';
+    const paymentStatus = req.query.paymentStatus ? normalizePaymentStatus(req.query.paymentStatus) : '';
 
     const query = {};
 
     if (course) {
       query.course = course;
+    }
+
+    if (paymentStatus) {
+      query.paymentStatus = paymentStatus;
     }
 
     if (search) {
