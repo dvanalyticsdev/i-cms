@@ -1708,6 +1708,16 @@ body.nav-open {
     margin-bottom: 16px;
 }
 
+.section-header.attendance-card-header {
+    padding: 0 0 14px;
+    margin-bottom: 14px;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
 .page-section-header {
     justify-content: flex-end;
     align-items: center;
