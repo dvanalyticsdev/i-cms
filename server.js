@@ -52,6 +52,18 @@ const initializeDatabase = async () => {
       // index not found or couldn't be dropped, which is fine
     }
 
+    try {
+      const studentCollection = mongoose.connection.collection('students');
+      const studentIndexes = await studentCollection.indexes();
+      for (const index of studentIndexes) {
+        if (index.name !== '_id_' && index.key && Object.prototype.hasOwnProperty.call(index.key, 'phoneNumber')) {
+          await studentCollection.dropIndex(index.name);
+        }
+      }
+    } catch (err) {
+      // ignore legacy phone index cleanup issues on fresh databases
+    }
+
     // Start background finalizer to run every 1 minute
     setInterval(async () => {
       try {

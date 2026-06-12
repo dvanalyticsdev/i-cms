@@ -10,6 +10,8 @@ let currentEditingSessionId = null;
 let deleteTargetSessionId = null;
 let allSessions = [];
 let availableCourses = [];
+let availableClassNames = [];
+let classAccessRules = [];
 let allCourses = [];
 let currentEditingCourseId = null;
 let deleteTargetCourseId = null;
@@ -23,6 +25,7 @@ let availableBatches = [];
 let allIssues = [];
 let deleteTargetIssueId = null;
 let allSessionLogs = [];
+let availableMentors = [];
 let sessionLogsMeta = { page: 1, limit: 10, total: 0, totalPages: 1 };
 let sessionLogsQuery = {
     search: '',
@@ -118,6 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     restorePendingToast();
     setupEventListeners();
     loadCourses(); // Load courses for the form
+    loadClassAccessRules();
     loadSessions();
     loadSessionLogs();
     loadGuestIds(); // Load guest IDs
@@ -129,6 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAttendanceInsights();
     loadAttendanceRoster();
     setInterval(loadSessions, 30000); // Refresh sessions every 30 seconds
+    setInterval(loadClassAccessRules, 30000); // Refresh access rules every 30 seconds
     setInterval(loadGuestIds, 30000); // Refresh guest IDs every 30 seconds
     setInterval(loadMentorIds, 30000); // Refresh mentor IDs every 30 seconds
     setInterval(loadMockInterviewIds, 30000); // Refresh mock interview IDs every 30 seconds
@@ -197,8 +202,11 @@ async function loadCourses() {
             availableCourses = Array.isArray(data.courseNames)
                 ? data.courseNames
                 : allCourses.map(course => course.courseName).filter(Boolean);
+            availableClassNames = Array.isArray(data.classNames) ? data.classNames : [];
             renderCourseManagement();
             renderCoursesCheckboxes();
+            populateSessionClassOptions();
+            populateStudentCourseSelect();
             populateStudentCourseFilter();
             populateAttendanceFilterOptions();
         }
@@ -239,6 +247,39 @@ function renderCoursesCheckboxes(selectedCourses = []) {
 function getSelectedCourses() {
     const checkboxes = document.querySelectorAll('input[name="course"]:checked');
     return Array.from(checkboxes).map(cb => cb.value);
+}
+
+function populateSessionClassOptions() {
+    const select = document.getElementById('sessionClassName');
+    if (!select) {
+        return;
+    }
+
+    const currentValue = select.value;
+    select.innerHTML = '<option value="">Select a class</option>';
+    availableClassNames.forEach(className => {
+        const option = document.createElement('option');
+        option.value = className;
+        option.textContent = className;
+        select.appendChild(option);
+    });
+    select.value = currentValue;
+}
+
+function populateStudentCourseSelect(selectedCourse = '') {
+    const select = document.getElementById('studentCourse');
+    if (!select) {
+        return;
+    }
+
+    select.innerHTML = '<option value="">Select a course</option>';
+    availableCourses.forEach(course => {
+        const option = document.createElement('option');
+        option.value = course;
+        option.textContent = course;
+        option.selected = selectedCourse === course;
+        select.appendChild(option);
+    });
 }
 
 /**
@@ -322,8 +363,194 @@ function switchTab(tabName) {
         loadCourses();
     }
 
+    if (tabName === 'class-access') {
+        loadClassAccessRules();
+    }
+
     if (tabName === 'session-logs') {
         loadSessionLogs(1);
+    }
+}
+
+async function loadClassAccessRules() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/class-access-rules`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!data.success) {
+            showToast(data.message || 'Failed to load class access rules', 'error');
+            return;
+        }
+
+        classAccessRules = Array.isArray(data.rules) ? data.rules : [];
+        availableClassNames = Array.isArray(data.classNames) ? data.classNames : availableClassNames;
+        renderClassAccessRules();
+        populateSessionClassOptions();
+    } catch (error) {
+        console.error('Error loading class access rules:', error);
+    }
+}
+
+function renderClassAccessRules() {
+    const head = document.getElementById('classAccessHead');
+    const body = document.getElementById('classAccessList');
+    const meta = document.getElementById('classAccessMeta');
+    if (!head || !body || !meta) {
+        return;
+    }
+
+    const columns = Array.from(new Set(availableClassNames)).sort();
+    head.innerHTML = `
+        <tr>
+            <th class="class-access-sticky class-access-sticky-left">Course</th>
+            <th class="class-access-sticky class-access-sticky-left-2">Payment Status</th>
+            ${columns.map(className => `
+                <th class="class-access-rule-header" title="${escapeHtml(className)}">
+                    <div class="class-access-header-cell">
+                        <span>${escapeHtml(className)}</span>
+                        <button type="button" class="class-access-remove-btn" onclick="removeClassColumn(decodeURIComponent('${encodeURIComponent(className)}'))" aria-label="Remove ${escapeHtml(className)}">Remove</button>
+                    </div>
+                </th>
+            `).join('')}
+        </tr>
+    `;
+
+    meta.textContent = `${classAccessRules.length} rule row(s) loaded. Scroll sideways to review all classes.`;
+
+    if (classAccessRules.length === 0) {
+        body.innerHTML = `
+            <tr>
+                <td colspan="${Math.max(columns.length + 2, 3)}" style="text-align: center; padding: 40px; color: #999;">No rules found yet.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    body.innerHTML = classAccessRules.map((rule, ruleIndex) => `
+        <tr>
+            <td class="class-access-sticky class-access-sticky-left class-access-label-cell">${escapeHtml(rule.course || '-')}</td>
+            <td class="class-access-sticky class-access-sticky-left-2 class-access-label-cell">${escapeHtml(rule.paymentStatus || 'DEFAULT')}</td>
+            ${columns.map((className) => `
+                <td class="class-access-rule-cell">
+                    <select class="form-input class-access-select" aria-label="${escapeHtml(rule.course || '')} ${escapeHtml(rule.paymentStatus || '')} ${escapeHtml(className)}" data-rule-index="${ruleIndex}" data-class-name="${escapeHtml(className)}">
+                        <option value="false" ${rule.accessMap?.[className] ? '' : 'selected'}>No</option>
+                        <option value="true" ${rule.accessMap?.[className] ? 'selected' : ''}>Yes</option>
+                    </select>
+                </td>
+            `).join('')}
+        </tr>
+    `).join('');
+}
+
+function normalizeClassName(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function addClassColumn() {
+    const input = document.getElementById('newClassName');
+    if (!input) {
+        return;
+    }
+
+    const className = normalizeClassName(input.value);
+    if (!className) {
+        showToast('Enter a class name first', 'error');
+        input.focus();
+        return;
+    }
+
+    const exists = availableClassNames.some(existing => existing.toLowerCase() === className.toLowerCase());
+    if (exists) {
+        showToast('That class already exists in the table', 'warning');
+        input.focus();
+        input.select();
+        return;
+    }
+
+    availableClassNames = [...availableClassNames, className].sort((left, right) => left.localeCompare(right));
+    classAccessRules = classAccessRules.map(rule => ({
+        ...rule,
+        accessMap: {
+            ...(rule.accessMap || {}),
+            [className]: false
+        }
+    }));
+
+    input.value = '';
+    renderClassAccessRules();
+    populateSessionClassOptions();
+    showToast(`Added ${className} to the access table`, 'success');
+}
+
+function removeClassColumn(className) {
+    const normalizedClassName = normalizeClassName(className);
+    if (!normalizedClassName) {
+        return;
+    }
+
+    availableClassNames = availableClassNames.filter(existing => existing !== normalizedClassName);
+    classAccessRules = classAccessRules.map(rule => {
+        const nextAccessMap = { ...(rule.accessMap || {}) };
+        delete nextAccessMap[normalizedClassName];
+        return {
+            ...rule,
+            accessMap: nextAccessMap
+        };
+    });
+
+    const sessionClassSelect = document.getElementById('sessionClassName');
+    if (sessionClassSelect?.value === normalizedClassName) {
+        sessionClassSelect.value = '';
+    }
+
+    renderClassAccessRules();
+    populateSessionClassOptions();
+    showToast(`Removed ${normalizedClassName} from the access table`, 'success');
+}
+
+async function saveClassAccessRules() {
+    try {
+        const payload = classAccessRules.map((rule, ruleIndex) => {
+            const nextAccessMap = { ...(rule.accessMap || {}) };
+            document.querySelectorAll(`[data-rule-index="${ruleIndex}"]`).forEach(input => {
+                nextAccessMap[input.dataset.className] = input.value === 'true';
+            });
+
+            return {
+                course: rule.course,
+                paymentStatus: rule.paymentStatus,
+                accessMap: nextAccessMap
+            };
+        });
+
+        const response = await fetch(`${API_BASE_URL}/class-access-rules`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ rules: payload })
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to save class access rules');
+        }
+
+        showToast('Class access rules updated successfully', 'success');
+        loadClassAccessRules();
+    } catch (error) {
+        console.error('Error saving class access rules:', error);
+        showToast(error.message || 'Error saving class access rules', 'error');
     }
 }
 
@@ -374,7 +601,7 @@ function renderSessions() {
     if (allSessions.length === 0) {
         sessionsList.innerHTML = `
             <tr>
-                <td colspan="6" style="text-align: center; padding: 40px;">
+                <td colspan="7" style="text-align: center; padding: 40px;">
                     <p style="color: #999;">No sessions yet. <a href="#" onclick="openCreateSessionModal(); return false;" style="color: #667eea;">Create one now</a></p>
                 </td>
             </tr>
@@ -393,7 +620,8 @@ function renderSessions() {
         <tr>
             <td>${escapeHtml(session.title)}</td>
             <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${session.meetingNumber}</code></td>
-            <td>${batchDisplay}<br><span style="color: #999; font-size: 12px;">${courseDisplay}</span></td>
+            <td>${escapeHtml(session.className || '-')}<br><span style="color: #999; font-size: 12px;">${batchDisplay} | ${courseDisplay}</span></td>
+            <td>${escapeHtml(session.mentorName || '-')}</td>
             <td>
                 <button class="btn-toggle ${session.status}" onclick="toggleSessionStatus('${session._id}', '${session.status}')">
                     ${session.status === 'on' ? 'ON' : 'OFF'}
@@ -434,8 +662,11 @@ function openCreateSessionModal() {
     document.getElementById('meetingNumber').value = '';
     document.getElementById('passcode').value = '';
     document.getElementById('description').value = '';
+    document.getElementById('mentorName').value = '';
     populateSessionBatchOptions();
+    populateSessionClassOptions();
     document.getElementById('sessionBatch').value = '';
+    document.getElementById('sessionClassName').value = '';
     renderCoursesCheckboxes([]); // Clear course selection
     document.getElementById('modalTitle').textContent = 'Create Session';
     document.getElementById('saveButtonText').textContent = 'Create Session';
@@ -460,8 +691,11 @@ async function openEditSessionModal(sessionId) {
     document.getElementById('meetingNumber').value = session.meetingNumber;
     document.getElementById('passcode').value = session.passcode;
     document.getElementById('description').value = session.description || '';
+    document.getElementById('mentorName').value = session.mentorName || '';
     populateSessionBatchOptions();
+    populateSessionClassOptions();
     document.getElementById('sessionBatch').value = session.batch || '';
+    document.getElementById('sessionClassName').value = session.className || '';
     renderCoursesCheckboxes(session.courses || []); // Pre-select session's courses
     document.getElementById('modalTitle').textContent = 'Edit Session';
     document.getElementById('saveButtonText').textContent = 'Save Changes';
@@ -489,11 +723,13 @@ async function handleSaveSession(event) {
     const meetingNumber = meetingNumberRaw.replace(/\s+/g, '');
     const passcode = document.getElementById('passcode').value.trim();
     const description = document.getElementById('description').value.trim();
+    const mentorName = document.getElementById('mentorName').value.trim();
+    const className = document.getElementById('sessionClassName').value.trim();
     const batch = document.getElementById('sessionBatch').value.trim();
     const courses = getSelectedCourses();
 
     // Validation
-    if (!title || !meetingNumber || !passcode || !batch) {
+    if (!title || !meetingNumber || !passcode || !batch || !mentorName || !className) {
         showToast('Please fill in all required fields', 'error');
         return;
     }
@@ -523,6 +759,8 @@ async function handleSaveSession(event) {
                 meetingNumber,
                 passcode,
                 description,
+                mentorName,
+                className,
                 batch,
                 courses
             })
@@ -1825,7 +2063,7 @@ function renderStudents() {
         if (allStudents.length === 0) {
             studentsList.innerHTML = `
                 <tr>
-                        <td colspan="6" style="text-align: center; padding: 40px;">
+                        <td colspan="8" style="text-align: center; padding: 40px;">
                         <p style="color: #999;">No students found. <a href="#" onclick="openAddStudentModal(); return false;" style="color: #667eea;">Add one now</a></p>
                     </td>
                 </tr>
@@ -1833,7 +2071,7 @@ function renderStudents() {
         } else {
             studentsList.innerHTML = `
                 <tr>
-                        <td colspan="6" style="text-align: center; padding: 40px;">
+                        <td colspan="8" style="text-align: center; padding: 40px;">
                         <p style="color: #999;">No matching students found. Try adjusting your search or filters.</p>
                     </td>
                 </tr>
@@ -1845,10 +2083,13 @@ function renderStudents() {
     studentsList.innerHTML = filteredStudents.map(student => `
         <tr>
             <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(student.lmsId)}</code></td>
-            <td>${escapeHtml(student.phoneNumber || '-')}</td>
-            <td>${escapeHtml(student.batch || '-')}</td>
             <td>${escapeHtml(student.name)}</td>
-            <td>${escapeHtml(Array.isArray(student.course) ? student.course.join(', ') : (student.course || '-'))}</td>
+            <td>${escapeHtml(student.mobile || '-')}</td>
+            <td>${escapeHtml(student.emailId || '-')}</td>
+            <td>${escapeHtml(student.batch || '-')}</td>
+            <td>${escapeHtml(student.year || '-')}</td>
+            <td>${escapeHtml(student.course || '-')}</td>
+            <td>${escapeHtml(student.paymentStatus || 'DEFAULT')}</td>
             <td>
                 <div class="actions">
                     <button class="btn-action edit" onclick="openEditStudentModal('${escapeHtml(student.lmsId)}')" title="Edit">Edit</button>
@@ -1924,36 +2165,16 @@ function openAddStudentModal() {
     document.getElementById('studentEditMode').value = 'false';
     document.getElementById('studentOriginalLmsId').value = '';
     document.getElementById('studentLmsId').value = '';
-    document.getElementById('studentPhoneNumber').value = '';
+    document.getElementById('studentMobile').value = '';
     document.getElementById('studentBatch').value = '';
     document.getElementById('studentName').value = '';
+    document.getElementById('studentEmailId').value = '';
+    document.getElementById('studentYear').value = '';
+    document.getElementById('studentPaymentStatus').value = 'DEFAULT';
     document.getElementById('studentModalTitle').textContent = 'Add New Student';
     document.getElementById('studentSubmitText').textContent = 'Add Student';
     document.getElementById('studentLmsId').disabled = false;
-    
-    // Populate courses with checkboxes
-    const checkboxesContainer = document.getElementById('studentCoursesCheckboxes');
-    checkboxesContainer.innerHTML = '';
-    availableCourses.forEach(course => {
-        const label = document.createElement('label');
-        label.style.display = 'flex';
-        label.style.alignItems = 'center';
-        label.style.marginBottom = '8px';
-        label.style.cursor = 'pointer';
-        
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.value = course;
-        checkbox.style.marginRight = '8px';
-        checkbox.className = 'studentCourseCheckbox';
-        
-        const span = document.createElement('span');
-        span.textContent = course;
-        
-        label.appendChild(checkbox);
-        label.appendChild(span);
-        checkboxesContainer.appendChild(label);
-    });
+    populateStudentCourseSelect();
     
     document.getElementById('studentModal').classList.remove('hidden');
 }
@@ -1968,38 +2189,16 @@ function openEditStudentModal(lmsId) {
     document.getElementById('studentEditMode').value = 'true';
     document.getElementById('studentOriginalLmsId').value = lmsId;
     document.getElementById('studentLmsId').value = student.lmsId;
-    document.getElementById('studentPhoneNumber').value = student.phoneNumber || '';
+    document.getElementById('studentMobile').value = student.mobile || '';
     document.getElementById('studentBatch').value = student.batch || '';
     document.getElementById('studentName').value = student.name;
+    document.getElementById('studentEmailId').value = student.emailId || '';
+    document.getElementById('studentYear').value = student.year || '';
+    document.getElementById('studentPaymentStatus').value = student.paymentStatus || 'DEFAULT';
     document.getElementById('studentModalTitle').textContent = 'Edit Student';
     document.getElementById('studentSubmitText').textContent = 'Save Changes';
     document.getElementById('studentLmsId').disabled = true;  // Cannot change LMS ID
-    
-    // Populate courses - normalize student.course to array
-    const studentCourses = Array.isArray(student.course) ? student.course : [student.course];
-    const checkboxesContainer = document.getElementById('studentCoursesCheckboxes');
-    checkboxesContainer.innerHTML = '';
-    availableCourses.forEach(course => {
-        const label = document.createElement('label');
-        label.style.display = 'flex';
-        label.style.alignItems = 'center';
-        label.style.marginBottom = '8px';
-        label.style.cursor = 'pointer';
-        
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.value = course;
-        checkbox.checked = studentCourses.includes(course);
-        checkbox.style.marginRight = '8px';
-        checkbox.className = 'studentCourseCheckbox';
-        
-        const span = document.createElement('span');
-        span.textContent = course;
-        
-        label.appendChild(checkbox);
-        label.appendChild(span);
-        checkboxesContainer.appendChild(label);
-    });
+    populateStudentCourseSelect(student.course || '');
     
     document.getElementById('studentModal').classList.remove('hidden');
 }
@@ -2019,22 +2218,16 @@ async function handleSaveStudent(event) {
 
     const editMode = document.getElementById('studentEditMode').value === 'true';
     const lmsId = document.getElementById('studentLmsId').value.trim();
-    const phoneNumber = document.getElementById('studentPhoneNumber').value.trim();
+    const mobile = document.getElementById('studentMobile').value.trim();
     const batch = document.getElementById('studentBatch').value.trim();
     const name = document.getElementById('studentName').value.trim();
-    
-    // Get selected courses from checkboxes
-    const courseCheckboxes = document.querySelectorAll('.studentCourseCheckbox:checked');
-    const courses = Array.from(courseCheckboxes).map(cb => cb.value);
+    const emailId = document.getElementById('studentEmailId').value.trim();
+    const year = document.getElementById('studentYear').value.trim();
+    const course = document.getElementById('studentCourse').value.trim();
+    const paymentStatus = document.getElementById('studentPaymentStatus').value;
 
-    if (!lmsId || !phoneNumber || !batch || !name || courses.length === 0) {
-        showToast('Please fill in all fields and select at least one course', 'error');
-        return;
-    }
-
-    const normalizedPhoneNumber = phoneNumber.replace(/\D/g, '');
-    if (normalizedPhoneNumber.length < 10 || normalizedPhoneNumber.length > 15) {
-        showToast('Enter a valid phone number with 10 to 15 digits', 'error');
+    if (!lmsId || !batch || !name || !course) {
+        showToast('Please fill in LMS ID, Name, Batch, and Course', 'error');
         return;
     }
 
@@ -2048,7 +2241,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ name, phoneNumber, batch, courses })
+                body: JSON.stringify({ name, mobile, emailId, batch, course, year, paymentStatus })
             });
         } else {
             // Add new student
@@ -2058,7 +2251,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ lmsId, name, phoneNumber, batch, courses })
+                body: JSON.stringify({ lmsId, name, mobile, emailId, batch, course, year, paymentStatus })
             });
         }
 
@@ -2131,7 +2324,9 @@ async function confirmDeleteStudent() {
 function populateAttendanceFilterOptions() {
     const batchSelect = document.getElementById('attendanceBatchFilter');
     const courseSelect = document.getElementById('attendanceCourseFilter');
+    const mentorSelect = document.getElementById('attendanceMentorFilter');
     const sessionSelect = document.getElementById('attendanceSessionFilter');
+    availableMentors = Array.from(new Set(allSessions.map(session => session.mentorName).filter(Boolean))).sort();
 
     if (batchSelect) {
         const currentValue = batchSelect.value;
@@ -2155,6 +2350,18 @@ function populateAttendanceFilterOptions() {
             courseSelect.appendChild(option);
         });
         courseSelect.value = currentValue;
+    }
+
+    if (mentorSelect) {
+        const currentValue = mentorSelect.value;
+        mentorSelect.innerHTML = '<option value="">All Mentors</option>';
+        availableMentors.forEach(mentorName => {
+            const option = document.createElement('option');
+            option.value = mentorName;
+            option.textContent = mentorName;
+            mentorSelect.appendChild(option);
+        });
+        mentorSelect.value = currentValue;
     }
 
     if (sessionSelect) {
@@ -2194,6 +2401,7 @@ function collectAttendanceFilters() {
         to: document.getElementById('attendanceToDate')?.value || '',
         batch: document.getElementById('attendanceBatchFilter')?.value || '',
         course: document.getElementById('attendanceCourseFilter')?.value || '',
+        mentorName: document.getElementById('attendanceMentorFilter')?.value || '',
         sessionId: document.getElementById('attendanceSessionFilter')?.value || '',
         search: document.getElementById('attendanceSearch')?.value.trim() || ''
     };
@@ -2215,6 +2423,7 @@ function resetAttendanceFilters() {
     const toDate = document.getElementById('attendanceToDate');
     const batch = document.getElementById('attendanceBatchFilter');
     const course = document.getElementById('attendanceCourseFilter');
+    const mentor = document.getElementById('attendanceMentorFilter');
     const session = document.getElementById('attendanceSessionFilter');
     const search = document.getElementById('attendanceSearch');
     const rosterBand = document.getElementById('attendanceRosterBand');
@@ -2225,6 +2434,7 @@ function resetAttendanceFilters() {
     if (toDate) { toDate.value = ''; toDate.disabled = true; }
     if (batch) batch.value = '';
     if (course) course.value = '';
+    if (mentor) mentor.value = '';
     if (session) session.value = '';
     if (search) search.value = '';
     if (rosterBand) rosterBand.value = 'all';
@@ -2244,11 +2454,14 @@ function getAttendanceDemoSessions(filters) {
         if (filters.course && session.course !== filters.course) {
             return false;
         }
+        if (filters.mentorName && session.mentorName !== filters.mentorName) {
+            return false;
+        }
         if (filters.sessionId && session.sessionId !== filters.sessionId) {
             return false;
         }
         if (search) {
-            const haystack = [session.sessionId, session.sessionName, session.course].join(' ').toLowerCase();
+            const haystack = [session.sessionId, session.sessionName, session.course, session.className, session.mentorName].join(' ').toLowerCase();
             if (!haystack.includes(search)) {
                 return false;
             }
@@ -2269,8 +2482,11 @@ function getAttendanceDemoRoster(filters) {
         if (filters.course && student.course !== filters.course) {
             return false;
         }
+        if (filters.mentorName && student.mentorName !== filters.mentorName) {
+            return false;
+        }
         if (search) {
-            const haystack = [student.lmsId, student.name, student.phoneNumber, student.batch, student.course].join(' ').toLowerCase();
+            const haystack = [student.lmsId, student.name, student.mobile || student.phoneNumber, student.batch, student.course, student.mentorName].join(' ').toLowerCase();
             if (!haystack.includes(search)) {
                 return false;
             }
@@ -2353,6 +2569,7 @@ async function loadAttendanceInsights(page = 1) {
             to: filters.to,
             batch: filters.batch,
             course: filters.course,
+            mentorName: filters.mentorName,
             sessionId: filters.sessionId,
             search: filters.search
         });
@@ -2405,7 +2622,7 @@ async function loadAttendanceInsights(page = 1) {
         if (riskList) {
             riskList.innerHTML = `
                 <tr>
-                    <td colspan="6" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load attendance insights')}</td>
+                    <td colspan="8" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load attendance insights')}</td>
                 </tr>
             `;
         }
@@ -2437,7 +2654,7 @@ function renderAttendanceRiskTable() {
     if (records.length === 0) {
         riskList.innerHTML = `
             <tr>
-                <td colspan="6" style="text-align: center; padding: 40px; color: #999;">No sessions found for the selected filters.</td>
+                <td colspan="8" style="text-align: center; padding: 40px; color: #999;">No sessions found for the selected filters.</td>
             </tr>
         `;
         return;
@@ -2451,6 +2668,8 @@ function renderAttendanceRiskTable() {
             </td>
             <td>${escapeHtml(session.batch || '-')}</td>
             <td>${escapeHtml(session.course || '-')}</td>
+            <td>${escapeHtml(session.className || '-')}</td>
+            <td>${escapeHtml(session.mentorName || '-')}</td>
             <td>${session.attendanceDate ? escapeHtml(session.attendanceDate) : '-'}</td>
             <td><strong>${escapeHtml(String(session.uniqueStudents ?? session.presentCount ?? 0))}</strong></td>
             <td>
@@ -2481,7 +2700,7 @@ async function viewAttendance(sessionId, showLoadingState = true) {
     if (showLoadingState && detailList) {
         detailList.innerHTML = `
             <tr>
-                <td colspan="6" style="text-align: center; padding: 40px; color: #999;">Loading session attendance...</td>
+                <td colspan="7" style="text-align: center; padding: 40px; color: #999;">Loading session attendance...</td>
             </tr>
         `;
     }
@@ -2500,7 +2719,8 @@ async function viewAttendance(sessionId, showLoadingState = true) {
             from: filters.from,
             to: filters.to,
             batch: filters.batch,
-            course: filters.course
+            course: filters.course,
+            mentorName: filters.mentorName
         });
 
         const response = await fetch(`${API_BASE_URL}/attendance/session/${encodeURIComponent(sessionId)}?${params.toString()}`, {
@@ -2530,7 +2750,7 @@ async function viewAttendance(sessionId, showLoadingState = true) {
         if (detailList) {
             detailList.innerHTML = `
                 <tr>
-                    <td colspan="6" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load session attendance')}</td>
+                    <td colspan="7" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load session attendance')}</td>
                 </tr>
             `;
         }
@@ -2555,7 +2775,7 @@ function renderAttendanceDetailTable() {
         detailMeta.textContent = 'Choose a session to view attendance.';
         detailList.innerHTML = `
             <tr>
-                <td colspan="6" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
+                <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
             </tr>
         `;
         return;
@@ -2566,7 +2786,7 @@ function renderAttendanceDetailTable() {
     if (records.length === 0) {
         detailList.innerHTML = `
             <tr>
-                <td colspan="6" style="text-align: center; padding: 40px; color: #999;">No attendance records found for this session.</td>
+                <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No attendance records found for this session.</td>
             </tr>
         `;
         return;
@@ -2576,7 +2796,8 @@ function renderAttendanceDetailTable() {
         <tr>
             <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(record.lmsId)}</code></td>
             <td>${escapeHtml(record.studentName || '-')}</td>
-            <td>${escapeHtml(record.phoneNumber || '-')}</td>
+            <td>${escapeHtml(record.mobile || record.phoneNumber || '-')}</td>
+            <td>${escapeHtml(record.mentorName || session.mentorName || '-')}</td>
             <td>${record.attendedAt ? escapeHtml(formatAttendanceDateTime(record.attendedAt)) : '-'}</td>
             <td>${escapeHtml(formatDuration(record.durationMinutes))}</td>
             <td><span class="risk-pill" style="background: rgba(72, 187, 120, 0.12); color: #276749;">${escapeHtml(record.status || 'present')}</span></td>
@@ -2624,6 +2845,7 @@ async function loadAttendanceRoster(page = 1) {
             to: filters.to,
             batch: filters.batch,
             course: filters.course,
+            mentorName: filters.mentorName,
             sessionId: filters.sessionId,
             search: filters.search,
             attendanceBand,
@@ -2688,7 +2910,7 @@ function renderAttendanceRoster() {
             <tr>
                 <td><code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${escapeHtml(student.lmsId)}</code></td>
                 <td>${escapeHtml(student.name || '-')}</td>
-                <td>${escapeHtml(student.phoneNumber || '-')}</td>
+                <td>${escapeHtml(student.mobile || student.phoneNumber || '-')}</td>
                 <td>${escapeHtml(student.course || '-')}</td>
                 <td><strong>${escapeHtml(String(student.attendancePercentage ?? 0))}%</strong></td>
                 <td>${escapeHtml(String(student.presentSessions ?? 0))}</td>

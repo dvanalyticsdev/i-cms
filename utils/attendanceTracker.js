@@ -8,12 +8,13 @@ function roundMinutes(ms) {
 async function recordSessionJoin({
   lmsId,
   studentName,
-  phoneNumber,
+  mobile,
   course,
   batch,
   sessionId,
   sessionName,
-  trainerName,
+  mentorName,
+  className,
   attendanceDate,
   source = 'session-join',
   joinedAt = new Date()
@@ -29,12 +30,13 @@ async function recordSessionJoin({
     const record = new AttendanceRecord({
       lmsId,
       studentName,
-      phoneNumber,
+      mobile,
       course,
       batch,
       sessionId,
       sessionName,
-      trainerName,
+      mentorName,
+      className,
       attendanceDate,
       attendedAt: joinedAt,
       firstJoinedAt: joinedAt,
@@ -52,11 +54,12 @@ async function recordSessionJoin({
   }
 
   existingRecord.studentName = studentName;
-  existingRecord.phoneNumber = phoneNumber;
+  existingRecord.mobile = mobile;
   existingRecord.course = course;
   existingRecord.batch = batch;
   existingRecord.sessionName = sessionName;
-  existingRecord.trainerName = trainerName;
+  existingRecord.mentorName = mentorName;
+  existingRecord.className = className;
   existingRecord.attendanceDate = attendanceDate;
   existingRecord.attendedAt = joinedAt;
   existingRecord.lastSeenAt = joinedAt;

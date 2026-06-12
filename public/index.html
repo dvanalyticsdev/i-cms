@@ -105,21 +105,6 @@
                         <span class="form-error" id="nameError"></span>
                     </div>
 
-                    <!-- Phone Number Input -->
-                    <div class="form-group">
-                        <label for="phoneNumber" class="form-label">Phone Number *</label>
-                        <input 
-                            type="tel" 
-                            id="phoneNumber" 
-                            class="form-input" 
-                            placeholder="e.g., +91 98765 43210"
-                            required
-                            inputmode="tel"
-                            autocomplete="off"
-                        >
-                        <span class="form-error" id="phoneNumberError"></span>
-                    </div>
-
                     <!-- Remember Device Checkbox -->
                     <div class="form-group checkbox">
                         <input 
@@ -247,6 +232,25 @@
             <div class="modal-footer modal-actions">
                 <button class="btn btn-secondary" onclick="closeAlreadyLoggedInModal()">Cancel</button>
                 <button class="btn btn-primary" onclick="forceLogoutOtherDevice()">Clear Active Session</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Blocking Warning Modal -->
+    <div id="warningModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-container modal-alert">
+            <div class="modal-header">
+                <h2 class="modal-title">Unable to Proceed</h2>
+            </div>
+            <div class="modal-body">
+                <div class="alert-content">
+                    <p class="alert-icon">!</p>
+                    <p class="alert-message" id="warningModalMessage">Warning message</p>
+                </div>
+            </div>
+            <div class="modal-footer modal-actions">
+                <button class="btn btn-primary" onclick="closeWarningModal()">Close</button>
             </div>
         </div>
     </div>

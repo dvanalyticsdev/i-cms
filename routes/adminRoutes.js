@@ -4,14 +4,17 @@ const authMiddleware = require('../middleware/authMiddleware');
 const { generateToken, verifyAdminCredentials } = require('../utils/jwtUtils');
 const ClassSession = require('../models/ClassSession');
 const Course = require('../models/Course');
+const ClassAccessRule = require('../models/ClassAccessRule');
 const ActiveSession = require('../models/ActiveSession');
 const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
 const IssueReport = require('../models/IssueReport');
 const SessionLog = require('../models/SessionLog');
 const { logSessionActivity } = require('../utils/sessionLogger');
-const { sanitizeLmsId, normalizePhoneNumber, isValidPhoneNumber } = require('../utils/studentValidation');
+const { sanitizeLmsId } = require('../utils/studentValidation');
 const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
+const { normalizePaymentStatus } = require('../utils/classAccess');
+const { syncWorkbookData } = require('../utils/workbookSync');
 const XLSX = require('xlsx');
 const crypto = require('crypto');
 
@@ -119,6 +122,22 @@ async function validateSelectedCourses(courses) {
   }
 
   return courses;
+}
+
+async function getClassCatalog() {
+  const rules = await ClassAccessRule.find({}).lean();
+  const classNames = new Set();
+
+  rules.forEach((rule) => {
+    const accessMap = rule.accessMap instanceof Map ? Object.fromEntries(rule.accessMap.entries()) : (rule.accessMap || {});
+    Object.keys(accessMap).forEach((className) => {
+      if (className) {
+        classNames.add(className);
+      }
+    });
+  });
+
+  return Array.from(classNames).sort();
 }
 
 /**
@@ -281,11 +300,13 @@ router.post('/session', authMiddleware, async (req, res) => {
       return;
     }
 
-    const { title, meetingNumber, passcode, description, courses, batch } = req.body;
+    const { title, meetingNumber, passcode, description, courses, batch, mentorName, className } = req.body;
     const normalizedBatch = normalizeText(batch);
+    const normalizedMentorName = normalizeText(mentorName);
+    const normalizedClassName = normalizeText(className);
 
-    if (!title || !meetingNumber || !passcode || !normalizedBatch) {
-      return res.status(400).json({ success: false, message: 'Title, Meeting Number, Passcode, and Batch are required' });
+    if (!title || !meetingNumber || !passcode || !normalizedBatch || !normalizedMentorName || !normalizedClassName) {
+      return res.status(400).json({ success: false, message: 'Title, Meeting Number, Passcode, Batch, Mentor Name, and Class Name are required' });
     }
 
     const sanitizedMeetingNumber = meetingNumber.toString().replace(/\s/g, '');
@@ -304,6 +325,8 @@ router.post('/session', authMiddleware, async (req, res) => {
       meetingNumber: sanitizedMeetingNumber,
       passcode: passcode.toString().trim(),
       description: (description || '').trim(),
+      mentorName: normalizedMentorName,
+      className: normalizedClassName,
       batch: normalizedBatch,
       courses: normalizedCourses,
       status: 'on',
@@ -371,8 +394,8 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
       return;
     }
 
-    const { title, meetingNumber, passcode, description, courses, batch } = req.body;
-    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined) {
+    const { title, meetingNumber, passcode, description, courses, batch, mentorName, className } = req.body;
+    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined && mentorName === undefined && className === undefined) {
       return res.status(400).json({ success: false, message: 'At least one field must be provided for update' });
     }
 
@@ -390,6 +413,20 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
     }
     if (passcode) updateData.passcode = passcode.toString().trim();
     if (description !== undefined) updateData.description = (description || '').trim();
+    if (mentorName !== undefined) {
+      const normalizedMentorName = normalizeText(mentorName);
+      if (!normalizedMentorName) {
+        return res.status(400).json({ success: false, message: 'Mentor Name is required' });
+      }
+      updateData.mentorName = normalizedMentorName;
+    }
+    if (className !== undefined) {
+      const normalizedClassName = normalizeText(className);
+      if (!normalizedClassName) {
+        return res.status(400).json({ success: false, message: 'Class Name is required' });
+      }
+      updateData.className = normalizedClassName;
+    }
     if (batch !== undefined) {
       const normalizedBatch = normalizeText(batch);
       if (!normalizedBatch) {
@@ -510,10 +547,16 @@ router.get('/active-sessions', authMiddleware, async (req, res) => {
       const totalMeetingTimeMs = joinedAtDate && !Number.isNaN(joinedAtDate.getTime()) ? Date.now() - joinedAtDate.getTime() : 0;
 
       let classTitle = null;
+      let mentorName = null;
+      let className = null;
       if (s.classSessionId) {
         try {
           const cs = await ClassSession.findOne({ sessionId: s.classSessionId }).lean();
-          if (cs) classTitle = cs.title || null;
+          if (cs) {
+            classTitle = cs.title || null;
+            mentorName = cs.mentorName || null;
+            className = cs.className || null;
+          }
         } catch (err) {
           console.warn('Error looking up class session title:', err.message);
         }
@@ -528,6 +571,8 @@ router.get('/active-sessions', authMiddleware, async (req, res) => {
         deviceToken: s.deviceToken || '',
         classSessionId: s.classSessionId || null,
         classSessionTitle: classTitle,
+        mentorName,
+        className,
         meetingNumber: s.meetingNumber || null
       });
     }
@@ -549,17 +594,109 @@ router.get('/courses', authMiddleware, async (req, res) => {
     }
 
     await Course.updateMany({ status: { $ne: 'active' } }, { $set: { status: 'active' } });
-    const courses = await Course.find({}).sort({ createdAt: -1 }).lean();
+    const [courses, classNames] = await Promise.all([
+      Course.find({}).sort({ createdAt: -1 }).lean(),
+      getClassCatalog()
+    ]);
     return res.status(200).json({
       success: true,
       message: 'Courses retrieved successfully',
       courses,
       courseNames: courses.map(course => course.courseName),
+      classNames,
       total: courses.length
     });
   } catch (error) {
     console.error('Error retrieving courses:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/admin/class-access-rules
+ */
+router.get('/class-access-rules', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const rules = await ClassAccessRule.find({}).sort({ course: 1, paymentStatus: 1 }).lean();
+    const classNames = await getClassCatalog();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Class access rules retrieved successfully',
+      classNames,
+      rules: rules.map((rule) => ({
+        ...rule,
+        accessMap: rule.accessMap instanceof Map ? Object.fromEntries(rule.accessMap.entries()) : (rule.accessMap || {})
+      }))
+    });
+  } catch (error) {
+    console.error('Error retrieving class access rules:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * PUT /api/admin/class-access-rules
+ */
+router.put('/class-access-rules', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const rules = Array.isArray(req.body.rules) ? req.body.rules : [];
+    if (rules.length === 0) {
+      return res.status(400).json({ success: false, message: 'At least one rule row is required' });
+    }
+
+    await ClassAccessRule.bulkWrite(
+      rules.map((rule) => ({
+        updateOne: {
+          filter: {
+            course: normalizeText(rule.course),
+            paymentStatus: normalizePaymentStatus(rule.paymentStatus)
+          },
+          update: {
+            $set: {
+              accessMap: rule.accessMap || {},
+              source: 'dashboard'
+            }
+          },
+          upsert: true
+        }
+      })),
+      { ordered: false }
+    );
+
+    return res.status(200).json({ success: true, message: 'Class access rules updated successfully' });
+  } catch (error) {
+    console.error('Error updating class access rules:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * POST /api/admin/system-sync
+ */
+router.post('/system-sync', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const summary = await syncWorkbookData(req.body || {});
+    return res.status(200).json({
+      success: true,
+      message: 'Workbook data synced successfully',
+      summary
+    });
+  } catch (error) {
+    console.error('Error syncing workbook data:', error.message);
+    return res.status(500).json({ success: false, message: error.message || 'Server error' });
   }
 });
 
@@ -968,7 +1105,9 @@ router.get('/students', authMiddleware, async (req, res) => {
         { lmsId: new RegExp(escapedSearch, 'i') },
         { name: new RegExp(escapedSearch, 'i') },
         { batch: new RegExp(escapedSearch, 'i') },
-        { phoneNumber: new RegExp(escapedSearch, 'i') }
+        { mobile: new RegExp(escapedSearch, 'i') },
+        { emailId: new RegExp(escapedSearch, 'i') },
+        { paymentStatus: new RegExp(escapedSearch, 'i') }
       ];
     }
 
@@ -999,17 +1138,13 @@ router.get('/students', authMiddleware, async (req, res) => {
  */
 router.post('/students', authMiddleware, async (req, res) => {
   try {
-    const { lmsId, name, phoneNumber, batch, courses } = req.body;
+    const { lmsId, name, mobile, emailId, batch, course, year, paymentStatus } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
-    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
     const normalizedBatch = normalizeText(batch);
+    const normalizedCourse = normalizeText(course);
 
-    if (!sanitizedLmsId || !name || !phoneNumber || !normalizedBatch || !courses || !Array.isArray(courses) || courses.length === 0) {
-      return res.status(400).json({ success: false, message: 'LMS ID, Name, Phone Number, Batch, and at least one Course are required' });
-    }
-
-    if (!isValidPhoneNumber(normalizedPhoneNumber)) {
-      return res.status(400).json({ success: false, message: 'Enter a valid phone number with 10 to 15 digits' });
+    if (!sanitizedLmsId || !name || !normalizedBatch || !normalizedCourse) {
+      return res.status(400).json({ success: false, message: 'LMS ID, Name, Batch, and Course are required' });
     }
 
     const duplicateLmsId = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
@@ -1017,17 +1152,15 @@ router.post('/students', authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Student with this LMS ID already exists' });
     }
 
-    const duplicatePhoneNumber = await Student.findOne({ phoneNumber: normalizedPhoneNumber }).lean();
-    if (duplicatePhoneNumber) {
-      return res.status(400).json({ success: false, message: 'Student with this phone number already exists' });
-    }
-
     const newStudent = new Student({
       lmsId: sanitizedLmsId,
       name: name.trim(),
-      phoneNumber: normalizedPhoneNumber,
+      mobile: normalizeText(mobile).replace(/\D/g, ''),
+      emailId: normalizeText(emailId).toLowerCase(),
       batch: normalizedBatch,
-      course: courses.map(c => c.trim()).filter(c => c)
+      course: normalizedCourse,
+      year: normalizeText(year),
+      paymentStatus: normalizePaymentStatus(paymentStatus)
     });
     
     await newStudent.save();
@@ -1046,17 +1179,13 @@ router.post('/students', authMiddleware, async (req, res) => {
 router.put('/students/:lmsId', authMiddleware, async (req, res) => {
   try {
     const { lmsId } = req.params;
-    const { name, phoneNumber, batch, courses } = req.body;
+    const { name, mobile, emailId, batch, course, year, paymentStatus } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
-    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
     const normalizedBatch = normalizeText(batch);
+    const normalizedCourse = normalizeText(course);
 
-    if (!name || !phoneNumber || !normalizedBatch || !courses || !Array.isArray(courses) || courses.length === 0) {
-      return res.status(400).json({ success: false, message: 'Name, Phone Number, Batch, and at least one Course are required' });
-    }
-
-    if (!isValidPhoneNumber(normalizedPhoneNumber)) {
-      return res.status(400).json({ success: false, message: 'Enter a valid phone number with 10 to 15 digits' });
+    if (!name || !normalizedBatch || !normalizedCourse) {
+      return res.status(400).json({ success: false, message: 'Name, Batch, and Course are required' });
     }
 
     const existingStudent = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
@@ -1064,18 +1193,17 @@ router.put('/students/:lmsId', authMiddleware, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Student not found' });
     }
 
-    const duplicatePhoneNumber = await Student.findOne({
-      phoneNumber: normalizedPhoneNumber,
-      lmsId: { $ne: sanitizedLmsId }
-    }).lean();
-
-    if (duplicatePhoneNumber) {
-      return res.status(400).json({ success: false, message: 'Student with this phone number already exists' });
-    }
-
     const updated = await Student.findOneAndUpdate(
       { lmsId: sanitizedLmsId },
-      { name: name.trim(), phoneNumber: normalizedPhoneNumber, batch: normalizedBatch, course: courses.map(c => c.trim()).filter(c => c) },
+      {
+        name: name.trim(),
+        mobile: normalizeText(mobile).replace(/\D/g, ''),
+        emailId: normalizeText(emailId).toLowerCase(),
+        batch: normalizedBatch,
+        course: normalizedCourse,
+        year: normalizeText(year),
+        paymentStatus: normalizePaymentStatus(paymentStatus)
+      },
       { new: true }
     ).lean();
 

@@ -550,6 +550,20 @@ a:hover {
   max-width: 400px;
 }
 
+.modal-alert .modal-header {
+  justify-content: center;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.modal-alert .modal-title {
+  text-align: center;
+}
+
+.modal-alert .modal-body {
+  padding-top: var(--spacing-md);
+}
+
 .modal-loading {
   max-width: 350px;
   text-align: center;
@@ -561,12 +575,22 @@ a:hover {
 
 .alert-content {
   text-align: center;
+  padding: var(--spacing-sm) var(--spacing-md) var(--spacing-lg);
 }
 
 .alert-icon {
-  font-size: 48px;
-  display: block;
-  margin-bottom: var(--spacing-md);
+  width: 72px;
+  height: 72px;
+  margin: 0 auto var(--spacing-md);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 38px;
+  font-weight: 700;
+  color: var(--error-color);
+  background: rgba(244, 67, 54, 0.12);
+  border: 2px solid rgba(244, 67, 54, 0.18);
 }
 
 .alert-message {
@@ -574,6 +598,7 @@ a:hover {
   font-weight: 600;
   color: var(--dark-gray);
   margin-bottom: var(--spacing-sm);
+  line-height: 1.6;
 }
 
 .alert-submessage {

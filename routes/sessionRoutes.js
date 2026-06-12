@@ -4,9 +4,11 @@ const ClassSession = require('../models/ClassSession');
 const ActiveSession = require('../models/ActiveSession');
 const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
+const ClassAccessRule = require('../models/ClassAccessRule');
 const { generateZoomSignature } = require('../utils/zoomSignature');
 const { logSessionActivity } = require('../utils/sessionLogger');
 const { finalizeAttendanceForActiveSession, recordSessionJoin } = require('../utils/attendanceTracker');
+const { mapRulesByKey, isClassAccessible } = require('../utils/classAccess');
 
 /**
  * GET /api/class-sessions
@@ -15,6 +17,8 @@ router.get('/class-sessions', async (req, res) => {
   try {
     let studentCourse = null;
     let studentBatch = null;
+    let studentRecord = null;
+    let accessRuleMap = null;
     const { lmsId } = req.query;
     
     if (lmsId) {
@@ -33,8 +37,11 @@ router.get('/class-sessions', async (req, res) => {
           });
         }
       } else if (student && student.course) {
+        studentRecord = student;
         studentCourse = student.course;
         studentBatch = student.batch || null;
+        const rules = await ClassAccessRule.find({}).lean();
+        accessRuleMap = mapRulesByKey(rules);
       }
     }
 
@@ -42,13 +49,20 @@ router.get('/class-sessions', async (req, res) => {
     
     if (studentCourse) {
       const allSessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch')
+        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch mentorName className')
         .sort({ updatedAt: -1 })
         .lean();
       
       const filteredSessions = allSessions.filter(session => {
         if (studentBatch && session.batch && session.batch !== studentBatch) {
           return false;
+        }
+        if (studentRecord && session.className) {
+          return isClassAccessible({
+            student: studentRecord,
+            className: session.className,
+            ruleMap: accessRuleMap
+          });
         }
         if (!session.courses || session.courses.length === 0) {
           return true;
@@ -67,7 +81,7 @@ router.get('/class-sessions', async (req, res) => {
       });
     } else {
       const sessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch')
+        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch mentorName className')
         .sort({ updatedAt: -1 })
         .lean();
 
@@ -142,6 +156,22 @@ router.post('/join-session', async (req, res) => {
             message: 'This session is assigned to a different batch'
           });
         }
+        if (student && session.className) {
+          const rules = await ClassAccessRule.find({}).lean();
+          const ruleMap = mapRulesByKey(rules);
+          const isAllowed = isClassAccessible({
+            student,
+            className: session.className,
+            ruleMap
+          });
+
+          if (!isAllowed) {
+            return res.status(403).json({
+              success: false,
+              message: `Your current access settings do not allow entry to ${session.className}. Please contact your support team if you believe this is incorrect.`
+            });
+          }
+        }
         const existingActiveSession = await ActiveSession.findOne({ lmsId, status: 'active' });
 
         if (existingActiveSession) {
@@ -160,12 +190,13 @@ router.post('/join-session', async (req, res) => {
           await recordSessionJoin({
             lmsId,
             studentName: student.name || lmsId,
-            phoneNumber: student.phoneNumber || '',
-            course: Array.isArray(student.course) ? student.course[0] || '' : (student.course || ''),
+            mobile: student.mobile || '',
+            course: student.course || '',
             batch: student.batch || '',
             sessionId: session.sessionId,
             sessionName: session.title,
-            trainerName: session.createdBy || '',
+            mentorName: session.mentorName || '',
+            className: session.className || '',
             attendanceDate,
             source: 'session-join',
             joinedAt
@@ -192,7 +223,9 @@ router.post('/join-session', async (req, res) => {
         sessionId: session.sessionId,
         title: session.title,
         meetingNumber: session.meetingNumber,
-        status: session.status
+        status: session.status,
+        mentorName: session.mentorName || '',
+        className: session.className || ''
       },
       zoom: zoomSignature
     });

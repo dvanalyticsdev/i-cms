@@ -43,6 +43,18 @@ const classSessionSchema = new mongoose.Schema(
       trim: true,
       default: ''
     },
+    mentorName: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true
+    },
+    className: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true
+    },
     batch: {
       type: String,
       required: true,

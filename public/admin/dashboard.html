@@ -42,6 +42,9 @@
             <a href="#courses" class="nav-item" data-tab="courses">
                 <span class="nav-text">Course Management</span>
             </a>
+            <a href="#class-access" class="nav-item" data-tab="class-access">
+                <span class="nav-text">Class Access Management</span>
+            </a>
             <a href="#session-logs" class="nav-item" data-tab="session-logs">
                 <span class="nav-text">Session Logs</span>
             </a>
@@ -97,7 +100,8 @@
                         <tr>
                             <th>Title</th>
                             <th>Meeting ID</th>
-                            <th>Courses</th>
+                            <th>Class Access</th>
+                            <th>Mentor</th>
                             <th>Status</th>
                             <th>Created</th>
                             <th>Actions</th>
@@ -105,7 +109,7 @@
                     </thead>
                     <tbody id="sessionsList">
                         <tr class="loading-row">
-                            <td colspan="6" style="text-align: center; padding: 40px;">
+                            <td colspan="7" style="text-align: center; padding: 40px;">
                                 <div class="spinner"></div>
                                 <p>Loading sessions...</p>
                             </td>
@@ -164,6 +168,48 @@
                             <td colspan="4" style="text-align: center; padding: 40px;">
                                 <div class="spinner"></div>
                                 <p>Loading courses...</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Class Access Management Tab -->
+        <section id="class-access-tab" class="tab-content">
+            <div class="section-header">
+                <div>
+                    <h2 class="section-title">Class Access Management</h2>
+                    <p class="section-subtitle">Control class eligibility by course and payment status.</p>
+                </div>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <button class="btn btn-primary" onclick="saveClassAccessRules()">Save Rules</button>
+                </div>
+            </div>
+
+            <div class="class-access-toolbar">
+                <div class="class-access-add-row">
+                    <input
+                        type="text"
+                        id="newClassName"
+                        class="form-input class-access-new-input"
+                        placeholder="Add a new class column"
+                    >
+                    <button class="btn btn-secondary" onclick="addClassColumn()">Add Class</button>
+                </div>
+                <p class="class-access-help">Use the remove button in a class header to delete that class from the table.</p>
+            </div>
+
+            <div class="table-meta" id="classAccessMeta">Loading class access rules...</div>
+
+            <div class="table-container class-access-table-container">
+                <table class="table class-access-table" id="classAccessTable">
+                    <thead id="classAccessHead"></thead>
+                    <tbody id="classAccessList">
+                        <tr class="loading-row">
+                            <td colspan="6" style="text-align: center; padding: 40px;">
+                                <div class="spinner"></div>
+                                <p>Loading rules...</p>
                             </td>
                         </tr>
                     </tbody>
@@ -421,7 +467,7 @@
                         type="text"
                         id="studentSearch"
                         class="form-input"
-                        placeholder="Search by LMS ID, Name, or Phone..."
+                        placeholder="Search by LMS ID, Name, Mobile, Email, or Payment..."
                         style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"
                         onkeyup="filterAndSearchStudents()"
                     >
@@ -447,16 +493,19 @@
                     <thead>
                         <tr>
                             <th>LMS ID</th>
-                            <th>Phone Number</th>
-                            <th>Batch</th>
                             <th>Name</th>
+                            <th>Mobile</th>
+                            <th>Email</th>
+                            <th>Batch</th>
+                            <th>Year</th>
                             <th>Course</th>
+                            <th>Payment</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="studentsList">
                         <tr class="loading-row">
-                            <td colspan="6" style="text-align: center; padding: 40px;">
+                            <td colspan="8" style="text-align: center; padding: 40px;">
                                 <div class="spinner"></div>
                                 <p>Loading students...</p>
                             </td>
@@ -490,6 +539,9 @@
                 <select id="attendanceCourseFilter" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
                     <option value="">All Courses</option>
                 </select>
+                <select id="attendanceMentorFilter" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
+                    <option value="">All Mentors</option>
+                </select>
                 <select id="attendanceBatchFilter" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
                     <option value="">All Batches</option>
                 </select>
@@ -521,6 +573,8 @@
                                     <th>Session</th>
                                     <th>Batch</th>
                                     <th>Course</th>
+                                    <th>Class</th>
+                                    <th>Mentor</th>
                                     <th>Attendance Date</th>
                                     <th>Joined</th>
                                     <th>Actions</th>
@@ -528,7 +582,7 @@
                             </thead>
                             <tbody id="attendanceRiskList">
                                 <tr class="loading-row">
-                                    <td colspan="6" style="text-align: center; padding: 40px;">
+                                    <td colspan="8" style="text-align: center; padding: 40px;">
                                         <div class="spinner"></div>
                                         <p>Loading sessions...</p>
                                     </td>
@@ -553,7 +607,8 @@
                                 <tr>
                                     <th>LMS ID</th>
                                     <th>Name</th>
-                                    <th>Phone Number</th>
+                                    <th>Mobile</th>
+                                    <th>Mentor</th>
                                     <th>Joined At</th>
                                     <th>Duration</th>
                                     <th>Status</th>
@@ -561,7 +616,7 @@
                             </thead>
                             <tbody id="attendanceDetailList">
                                 <tr>
-                                    <td colspan="6" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
+                                    <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -598,7 +653,7 @@
                             <tr>
                                 <th>LMS ID</th>
                                 <th>Name</th>
-                                <th>Phone Number</th>
+                                <th>Mobile</th>
                                 <th>Course</th>
                                 <th>Attendance %</th>
                                 <th>Present Sessions</th>
@@ -722,11 +777,29 @@
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Assign to Courses</label>
+                        <label class="form-label">Mentor Name *</label>
+                        <input
+                            type="text"
+                            id="mentorName"
+                            class="form-input"
+                            placeholder="e.g., Priya Sharma"
+                            required
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Class Name *</label>
+                        <select id="sessionClassName" class="form-input" required>
+                            <option value="">Select a class</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Legacy Course Filter (Optional)</label>
                         <div id="coursesContainer" class="courses-container">
                             <p style="color: #999; font-size: 12px;">Loading courses...</p>
                         </div>
-                        <small class="form-hint">Select which courses can access this session. Leave empty to allow all courses.</small>
+                        <small class="form-hint">Leave empty to rely fully on Class Access Management rules.</small>
                     </div>
 
                     <div class="form-group">
@@ -954,13 +1027,12 @@
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Phone Number *</label>
+                        <label class="form-label">Mobile</label>
                         <input
                             type="tel"
-                            id="studentPhoneNumber"
+                            id="studentMobile"
                             class="form-input"
                             placeholder="e.g., +91 98765 43210"
-                            required
                             inputmode="tel"
                         >
                     </div>
@@ -988,10 +1060,39 @@
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Courses * (Select one or more)</label>
-                        <div id="studentCoursesCheckboxes" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px;">
-                            <!-- Checkboxes will be populated by JavaScript -->
-                        </div>
+                        <label class="form-label">Email ID</label>
+                        <input
+                            type="email"
+                            id="studentEmailId"
+                            class="form-input"
+                            placeholder="e.g., student@example.com"
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Year</label>
+                        <input
+                            type="text"
+                            id="studentYear"
+                            class="form-input"
+                            placeholder="e.g., 2021"
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Course *</label>
+                        <select id="studentCourse" class="form-input" required>
+                            <option value="">Select a course</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Payment Status *</label>
+                        <select id="studentPaymentStatus" class="form-input" required>
+                            <option value="DEFAULT">DEFAULT</option>
+                            <option value="FULLY PAID">FULLY PAID</option>
+                            <option value="PENDING">PENDING</option>
+                        </select>
                     </div>
 
                     <button type="submit" class="btn btn-primary" style="width: 100%;">

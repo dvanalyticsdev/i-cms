@@ -87,6 +87,9 @@ function buildAttendanceMatch(query = {}, window = {}) {
   if (query.course) {
     attendanceMatch.course = query.course;
   }
+  if (query.mentorName) {
+    attendanceMatch.mentorName = query.mentorName;
+  }
   if (query.sessionId) {
     attendanceMatch.sessionId = query.sessionId;
   }
@@ -151,6 +154,9 @@ async function buildAttendanceSnapshot(query = {}) {
   if (query.sessionId) {
     sessionQuery.sessionId = query.sessionId;
   }
+  if (query.mentorName) {
+    sessionQuery.mentorName = query.mentorName;
+  }
   if (window.start || window.end) {
     sessionQuery.createdAt = {};
     if (window.start) sessionQuery.createdAt.$gte = window.start;
@@ -158,12 +164,12 @@ async function buildAttendanceSnapshot(query = {}) {
   }
 
   const [students, attendanceRecords, sessions] = await Promise.all([
-    Student.find(studentQuery).select('lmsId name phoneNumber batch course createdAt').lean(),
+    Student.find(studentQuery).select('lmsId name mobile batch course createdAt').lean(),
     AttendanceRecord.find(attendanceMatch)
-      .select('lmsId studentName phoneNumber course batch sessionId sessionName trainerName attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes')
+      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes')
       .sort({ attendedAt: 1 })
       .lean(),
-    ClassSession.find(sessionQuery).select('sessionId title createdBy batch courses createdAt').sort({ createdAt: -1 }).lean()
+    ClassSession.find(sessionQuery).select('sessionId title mentorName className batch courses createdAt').sort({ createdAt: -1 }).lean()
   ]);
 
   const filteredSessions = sessions.filter((session) => {
@@ -242,7 +248,7 @@ async function buildAttendanceSnapshot(query = {}) {
   students.forEach((student) => {
     const studentRecords = attendanceByStudent.get(student.lmsId) || [];
     const presentSessions = new Set(studentRecords.map((record) => record.sessionId)).size;
-    const courseKey = Array.isArray(student.course) && student.course.length > 0 ? student.course[0] : (normalizeText(student.course) || 'Unassigned');
+    const courseKey = normalizeText(student.course) || 'Unassigned';
 
     if (!courseGroups.has(courseKey)) courseGroups.set(courseKey, { totalStudents: 0, presentSessions: 0 });
 
@@ -276,8 +282,8 @@ async function buildAttendanceSnapshot(query = {}) {
         lmsId: student.lmsId,
         name: student.name,
         batch: student.batch || 'Unassigned',
-        course: Array.isArray(student.course) ? student.course.join(', ') : (student.course || 'Unassigned'),
-        phoneNumber: student.phoneNumber || '',
+        course: student.course || 'Unassigned',
+        mobile: student.mobile || '',
         attendancePercentage,
         missedSessions,
         consecutiveMissedSessions,
@@ -299,9 +305,9 @@ async function buildAttendanceSnapshot(query = {}) {
     return {
       lmsId: student.lmsId,
       name: student.name,
-      phoneNumber: student.phoneNumber || '',
+      mobile: student.mobile || '',
       batch: student.batch || 'Unassigned',
-      course: Array.isArray(student.course) ? student.course.join(', ') : (student.course || 'Unassigned'),
+      course: student.course || 'Unassigned',
       attendancePercentage,
       presentSessions,
       absentSessions: Math.max(sessionsConducted - presentSessions, 0),
@@ -319,7 +325,8 @@ async function buildAttendanceSnapshot(query = {}) {
       sessionName: session.title,
       batch: session.batch || 'Unassigned',
       course: Array.isArray(session.courses) ? session.courses.join(', ') : '',
-      trainerName: session.createdBy || '',
+      mentorName: session.mentorName || '',
+      className: session.className || '',
       presentCount: uniqueStudents,
       uniqueStudents,
       attendancePercentage: getAttendanceRate(uniqueStudents, Math.max(students.length, 1)),
@@ -417,17 +424,17 @@ async function buildAttendanceSnapshot(query = {}) {
 }
 
 function toCsvRows(records) {
-  const headers = ['LMS ID', 'Name', 'Phone Number', 'Batch', 'Course', 'Session', 'Trainer', 'Attendance Date', 'Status', 'Attendance Percentage', 'Last Attendance Date'];
+  const headers = ['LMS ID', 'Name', 'Mobile', 'Batch', 'Course', 'Session', 'Mentor', 'Attendance Date', 'Status', 'Attendance Percentage', 'Last Attendance Date'];
   const lines = [headers.map(buildCsvValue).join(',')];
   records.forEach((record) => {
     lines.push([
       record.lmsId,
       record.name,
-      record.phoneNumber,
+      record.mobile,
       record.batch,
       record.course,
       record.sessionName || record.sessionId,
-      record.trainerName,
+      record.mentorName,
       record.attendanceDate,
       record.status,
       record.attendancePercentage !== undefined ? `${record.attendancePercentage}%` : '',
@@ -539,11 +546,11 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     const window = resolveWindow(req.query);
     const attendanceMatch = buildAttendanceMatch({ ...req.query, sessionId }, window);
     const records = await AttendanceRecord.find(attendanceMatch)
-      .select('lmsId studentName phoneNumber course batch sessionId sessionName trainerName attendanceDate attendedAt status')
+      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status')
       .sort({ attendedAt: 1 })
       .lean();
 
-    const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch courses createdBy').lean();
+    const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch className courses mentorName').lean();
 
     return res.status(200).json({
       success: true,
@@ -553,13 +560,16 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
         sessionName: session?.title || records[0]?.sessionName || sessionId,
         batch: session?.batch || records[0]?.batch || '',
         course: Array.isArray(session?.courses) ? session.courses.join(', ') : (records[0]?.course || ''),
-        trainerName: session?.createdBy || records[0]?.trainerName || '',
+        mentorName: session?.mentorName || records[0]?.mentorName || '',
+        className: session?.className || records[0]?.className || '',
         attendanceDate: records[0]?.attendanceDate || null
       },
       records: records.map((record) => ({
         lmsId: record.lmsId,
         studentName: record.studentName,
-        phoneNumber: record.phoneNumber || '',
+        mobile: record.mobile || '',
+        mentorName: record.mentorName || '',
+        className: record.className || '',
         attendedAt: record.attendedAt,
         attendanceDate: record.attendanceDate || null,
         status: record.status || 'present',
@@ -592,7 +602,7 @@ router.get('/roster', authMiddleware, async (req, res) => {
 
     if (search) {
       roster = roster.filter((student) => {
-        return [student.lmsId, student.name, student.phoneNumber, student.batch, student.course]
+        return [student.lmsId, student.name, student.mobile, student.batch, student.course]
           .filter(Boolean)
           .some((field) => String(field).toLowerCase().includes(search));
       });

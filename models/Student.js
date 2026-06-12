@@ -14,12 +14,17 @@ const studentSchema = new mongoose.Schema(
       required: true,
       trim: true
     },
-    phoneNumber: {
+    mobile: {
       type: String,
-      required: true,
-      unique: true,
+      default: '',
       trim: true,
       index: true
+    },
+    emailId: {
+      type: String,
+      default: '',
+      trim: true,
+      lowercase: true
     },
     batch: {
       type: String,
@@ -28,8 +33,23 @@ const studentSchema = new mongoose.Schema(
       index: true
     },
     course: {
-      type: [String],
-      default: []
+      type: String,
+      required: true,
+      trim: true,
+      index: true
+    },
+    year: {
+      type: String,
+      default: '',
+      trim: true,
+      index: true
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['FULLY PAID', 'PENDING', 'DEFAULT'],
+      default: 'DEFAULT',
+      trim: true,
+      index: true
     }
   },
   {

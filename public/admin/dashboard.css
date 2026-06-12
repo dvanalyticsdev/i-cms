@@ -450,6 +450,149 @@ body {
     padding: 40px 16px;
 }
 
+/* Class Access Matrix */
+.class-access-table-container {
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.class-access-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+    margin-bottom: 14px;
+}
+
+.class-access-add-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.class-access-new-input {
+    width: min(320px, 100%);
+}
+
+.class-access-help {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.class-access-table {
+    min-width: max-content;
+    width: auto;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.class-access-table th,
+.class-access-table td {
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.class-access-table th {
+    padding: 18px 18px;
+}
+
+.class-access-table td {
+    padding: 14px 18px;
+}
+
+.class-access-label-cell {
+    min-width: 128px;
+    font-weight: 600;
+    background: #fff;
+}
+
+.class-access-rule-header {
+    min-width: 118px;
+    max-width: 118px;
+    white-space: normal;
+    line-height: 1.35;
+}
+
+.class-access-header-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.class-access-remove-btn {
+    border: 1px solid #f3c1c1;
+    background: #fff5f5;
+    color: #c53030;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.class-access-remove-btn:hover {
+    background: #fed7d7;
+    border-color: #f56565;
+}
+
+.class-access-rule-cell {
+    min-width: 118px;
+    background: #fff;
+}
+
+.class-access-select {
+    min-width: 88px;
+    max-width: 88px;
+    padding: 10px 30px 10px 12px;
+    margin: 0 auto;
+    font-weight: 600;
+    text-align: center;
+    background-color: #fff;
+}
+
+.class-access-sticky {
+    position: sticky;
+    z-index: 3;
+    background: inherit;
+}
+
+.class-access-sticky-left {
+    left: 0;
+}
+
+.class-access-sticky-left-2 {
+    left: 128px;
+}
+
+.class-access-table thead .class-access-sticky {
+    z-index: 5;
+    background: var(--neutral-bg);
+}
+
+.class-access-table tbody .class-access-sticky {
+    background: #fff;
+}
+
+.class-access-table tbody tr:hover .class-access-sticky {
+    background: var(--neutral-bg);
+}
+
+.class-access-table thead .class-access-sticky-left,
+.class-access-table tbody .class-access-sticky-left {
+    box-shadow: 1px 0 0 var(--border-color);
+}
+
+.class-access-table thead .class-access-sticky-left-2,
+.class-access-table tbody .class-access-sticky-left-2 {
+    box-shadow: 1px 0 0 var(--border-color);
+}
+
 /* Status Badge */
 .status-badge {
     display: inline-flex;
@@ -870,6 +1013,15 @@ body {
 
     .export-panel .export-grid {
         grid-template-columns: 1fr;
+    }
+
+    .class-access-toolbar,
+    .class-access-add-row {
+        align-items: stretch;
+    }
+
+    .class-access-new-input {
+        width: 100%;
     }
 }
 

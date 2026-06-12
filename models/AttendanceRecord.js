@@ -14,9 +14,9 @@ const attendanceRecordSchema = new mongoose.Schema(
       trim: true,
       index: true
     },
-    phoneNumber: {
+    mobile: {
       type: String,
-      required: true,
+      default: '',
       trim: true,
       index: true
     },
@@ -44,7 +44,13 @@ const attendanceRecordSchema = new mongoose.Schema(
       trim: true,
       index: true
     },
-    trainerName: {
+    mentorName: {
+      type: String,
+      default: '',
+      trim: true,
+      index: true
+    },
+    className: {
       type: String,
       default: '',
       trim: true,
@@ -109,6 +115,6 @@ const attendanceRecordSchema = new mongoose.Schema(
 
 attendanceRecordSchema.index({ lmsId: 1, sessionId: 1, attendanceDate: 1 }, { unique: true });
 attendanceRecordSchema.index({ attendanceDate: 1, course: 1, batch: 1, sessionId: 1 });
-attendanceRecordSchema.index({ trainerName: 1, sessionId: 1 });
+attendanceRecordSchema.index({ mentorName: 1, sessionId: 1 });
 
 module.exports = mongoose.model('AttendanceRecord', attendanceRecordSchema);

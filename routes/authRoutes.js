@@ -6,11 +6,22 @@ const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
 const AttendanceRecord = require('../models/AttendanceRecord');
 const { logSessionActivity } = require('../utils/sessionLogger');
-const { sanitizeLmsId, normalizePhoneNumber, isValidPhoneNumber } = require('../utils/studentValidation');
+const { sanitizeLmsId } = require('../utils/studentValidation');
 const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
+const { findStudentInWorkbook } = require('../utils/workbookSync');
 
 function normalize(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function resolvePaymentStatus(studentRecord, lmsId) {
+  const mongoStatus = String(studentRecord?.paymentStatus || '').trim().toUpperCase();
+  if (mongoStatus) {
+    return mongoStatus;
+  }
+
+  const workbookStudent = findStudentInWorkbook(lmsId);
+  return String(workbookStudent?.paymentStatus || '').trim().toUpperCase();
 }
 
 /**
@@ -19,7 +30,7 @@ function normalize(value) {
  */
 router.post('/verify-student', async (req, res) => {
   try {
-    const { lmsId, phoneNumber, name, deviceToken, forceLogin } = req.body;
+    const { lmsId, name, deviceToken, forceLogin } = req.body;
 
     if (!lmsId || !deviceToken) {
       return res.status(400).json({
@@ -29,7 +40,6 @@ router.post('/verify-student', async (req, res) => {
     }
 
     const sanitizedLmsId = sanitizeLmsId(lmsId);
-    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
 
     const isGuestMentorId = sanitizedLmsId.startsWith('GUEST_') || sanitizedLmsId.startsWith('MENTOR_') || sanitizedLmsId.startsWith('MOCK_INTERVIEW_');
     
@@ -58,21 +68,7 @@ router.post('/verify-student', async (req, res) => {
         userType = 'mock-interview';
       }
     } else {
-      if (!phoneNumber) {
-        return res.status(400).json({
-          success: false,
-          message: 'Phone Number is required'
-        });
-      }
-
-      if (!isValidPhoneNumber(normalizedPhoneNumber)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Enter a valid phone number with 10 to 15 digits'
-        });
-      }
-
-      userInfo = await Student.findOne({ lmsId: sanitizedLmsId, phoneNumber: normalizedPhoneNumber }).lean();
+      userInfo = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
       if (userInfo) {
         isValid = true;
       }
@@ -85,13 +81,29 @@ router.post('/verify-student', async (req, res) => {
           userName: sanitizedLmsId,
           actionPerformed: 'Verify Login Attempt',
           status: 'Failed',
-          remarks: 'Invalid LMS ID and phone number combination'
+          remarks: 'Invalid LMS ID'
         });
       }
 
       return res.status(401).json({
         success: false,
-        message: isGuestMentorId ? 'Invalid ID or Name' : 'Invalid LMS ID or Phone Number'
+        message: 'We were unable to verify your details. Please contact the Program Department for assistance at 9611276828 or 8904250708.'
+      });
+    }
+
+    if (!isGuestMentorId && resolvePaymentStatus(userInfo, sanitizedLmsId) === 'DEFAULT') {
+      await logSessionActivity({
+        sessionName: 'Student Login',
+        userName: sanitizedLmsId,
+        actionPerformed: 'Verify Login Attempt',
+        status: 'Failed',
+        remarks: 'Login blocked due to default payment status'
+      });
+
+      return res.status(403).json({
+        success: false,
+        feePending: true,
+        message: 'Our records show that there is an outstanding fee balance on your account. Please contact the Finance Department at 8431424165, or use Report an Issue for support.'
       });
     }
 
@@ -121,8 +133,8 @@ router.post('/verify-student', async (req, res) => {
     const newActiveSession = new ActiveSession({
       sessionToken,
       lmsId: sanitizedLmsId,
-      name: userInfo?.name || (name ? name.trim() : sanitizedLmsId),
-      phoneNumber: userInfo?.phoneNumber || (normalizedPhoneNumber || null),
+      name: name ? name.trim() : (userInfo?.name || sanitizedLmsId),
+      phoneNumber: userInfo?.mobile || null,
       deviceToken,
       status: 'active'
     });
@@ -135,7 +147,7 @@ router.post('/verify-student', async (req, res) => {
         userName: sanitizedLmsId,
         actionPerformed: 'Verified Login',
         status: 'Success',
-        remarks: 'LMS ID and phone number validated successfully'
+        remarks: 'LMS ID validated successfully'
       });
     }
 
@@ -143,10 +155,10 @@ router.post('/verify-student', async (req, res) => {
       success: true,
       message: 'User verified successfully',
       sessionToken: sessionToken,
-      studentName: userInfo?.name || name?.trim() || sanitizedLmsId,
+      studentName: name?.trim() || userInfo?.name || sanitizedLmsId,
       lmsId: sanitizedLmsId,
       userType: userType,
-      phoneNumber: userInfo?.phoneNumber || normalizedPhoneNumber || undefined,
+      mobile: userInfo?.mobile || undefined,
       course: isGuestMentorId && userInfo ? userInfo.course : undefined,
       zoom: null
     });
@@ -166,7 +178,7 @@ router.post('/verify-student', async (req, res) => {
  */
 router.post('/force-logout', async (req, res) => {
   try {
-    const { lmsId, phoneNumber, name, deviceToken } = req.body;
+    const { lmsId, name, deviceToken } = req.body;
 
     if (!lmsId || !deviceToken) {
       return res.status(400).json({
@@ -176,7 +188,6 @@ router.post('/force-logout', async (req, res) => {
     }
 
     const sanitizedLmsId = sanitizeLmsId(lmsId);
-    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
 
     const isGuestMentorId = sanitizedLmsId.startsWith('GUEST_') || sanitizedLmsId.startsWith('MENTOR_') || sanitizedLmsId.startsWith('MOCK_INTERVIEW_');
     let isValid = false;
@@ -195,21 +206,7 @@ router.post('/force-logout', async (req, res) => {
         isValid = true;
       }
     } else {
-      if (!phoneNumber) {
-        return res.status(400).json({
-          success: false,
-          message: 'Phone Number is required'
-        });
-      }
-
-      if (!isValidPhoneNumber(normalizedPhoneNumber)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Enter a valid phone number with 10 to 15 digits'
-        });
-      }
-
-      const userInfo = await Student.findOne({ lmsId: sanitizedLmsId, phoneNumber: normalizedPhoneNumber }).lean();
+      const userInfo = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
       if (userInfo) {
         isValid = true;
       }
@@ -218,7 +215,7 @@ router.post('/force-logout', async (req, res) => {
     if (!isValid) {
       return res.status(401).json({
         success: false,
-        message: isGuestMentorId ? 'Invalid LMS ID or Student Name' : 'Invalid LMS ID or Phone Number'
+        message: 'We were unable to verify your details. Please contact the Program Department for assistance at 9611276828 or 8904250708.'
       });
     }
 
@@ -311,6 +308,20 @@ router.get('/session/:lmsId', async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'No active session found'
+      });
+    }
+
+    const studentRecord = await Student.findOne({ lmsId: lmsId.trim() }).lean();
+    if (studentRecord && resolvePaymentStatus(studentRecord, lmsId.trim()) === 'DEFAULT') {
+      await ActiveSession.updateOne(
+        { _id: sessionData._id },
+        { $set: { status: 'ended', endedAt: now, lastSeenAt: now } }
+      );
+
+      return res.status(403).json({
+        success: false,
+        feePending: true,
+        message: 'Our records show that there is an outstanding fee balance on your account. Please contact the Finance Department at 8431424165, or use Report an Issue for support.'
       });
     }
 
