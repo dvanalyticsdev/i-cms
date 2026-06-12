@@ -49,6 +49,7 @@ let attendanceInsightsState = {
     filters: {}
 };
 let attendanceInsightsLoading = false;
+let attendanceRosterSearchTimer = null;
 const attendanceDemoData = {
     metrics: {
         totalStudents: 42,
@@ -2592,6 +2593,17 @@ function collectAttendanceFilters() {
     };
 }
 
+function getAttendanceRosterSearchValue() {
+    return document.getElementById('attendanceRosterSearch')?.value.trim() || '';
+}
+
+function handleAttendanceRosterSearch() {
+    window.clearTimeout(attendanceRosterSearchTimer);
+    attendanceRosterSearchTimer = window.setTimeout(() => {
+        loadAttendanceRoster(1);
+    }, 180);
+}
+
 function applyAttendanceFilters() {
     const timeframe = document.getElementById('attendanceTimeframe')?.value || 'monthly';
     const fromDate = document.getElementById('attendanceFromDate');
@@ -2611,6 +2623,7 @@ function resetAttendanceFilters() {
     const mentor = document.getElementById('attendanceMentorFilter');
     const session = document.getElementById('attendanceSessionFilter');
     const search = document.getElementById('attendanceSearch');
+    const rosterSearch = document.getElementById('attendanceRosterSearch');
     const rosterBand = document.getElementById('attendanceRosterBand');
     const rosterSort = document.getElementById('attendanceRosterSort');
 
@@ -2622,6 +2635,7 @@ function resetAttendanceFilters() {
     if (mentor) mentor.value = '';
     if (session) session.value = '';
     if (search) search.value = '';
+    if (rosterSearch) rosterSearch.value = '';
     if (rosterBand) rosterBand.value = 'all';
     if (rosterSort) rosterSort.value = 'attendance-desc';
 
@@ -2656,7 +2670,7 @@ function getAttendanceDemoSessions(filters) {
 }
 
 function getAttendanceDemoRoster(filters) {
-    const search = (filters.search || '').toLowerCase();
+    const search = getAttendanceRosterSearchValue().toLowerCase();
     const attendanceBand = document.getElementById('attendanceRosterBand')?.value || 'all';
     const sortBy = document.getElementById('attendanceRosterSort')?.value || 'attendance-desc';
 
@@ -2994,6 +3008,7 @@ async function loadAttendanceRoster(page = 1) {
     const rosterMeta = document.getElementById('attendanceRosterMeta');
     const rosterList = document.getElementById('attendanceRosterList');
     const filters = collectAttendanceFilters();
+    const rosterSearch = getAttendanceRosterSearchValue();
     const attendanceBand = document.getElementById('attendanceRosterBand')?.value || 'all';
     const sortBy = document.getElementById('attendanceRosterSort')?.value || 'attendance-desc';
 
@@ -3032,7 +3047,7 @@ async function loadAttendanceRoster(page = 1) {
             course: filters.course,
             mentorName: filters.mentorName,
             sessionId: filters.sessionId,
-            search: filters.search,
+            search: rosterSearch,
             attendanceBand,
             sortBy
         });

@@ -681,6 +681,13 @@
                     </div>
                 </div>
                 <div class="attendance-toolbar table-toolbar-wrap">
+                    <input
+                        type="text"
+                        id="attendanceRosterSearch"
+                        class="form-input table-toolbar-search attendance-roster-search"
+                        placeholder="Search LMS ID, name, mobile, batch, course..."
+                        oninput="handleAttendanceRosterSearch()"
+                    >
                     <select id="attendanceRosterBand" class="form-input table-toolbar-select" onchange="loadAttendanceRoster(1)">
                         <option value="all">All Students</option>
                         <option value="perfect">100% Attendance</option>

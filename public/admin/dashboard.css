@@ -275,11 +275,16 @@ body {
 .attendance-stats-grid {
     grid-template-columns: repeat(2, minmax(220px, 1fr));
     margin-bottom: 24px;
+    align-items: stretch;
 }
 
 .attendance-stat-card {
     position: relative;
     overflow: hidden;
+    min-height: 136px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .attendance-stat-card::after {
@@ -323,12 +328,24 @@ body {
 
 .attendance-panels {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
     gap: 18px;
+    align-items: start;
 }
 
 .attendance-roster-panel {
     margin-top: 18px;
+}
+
+.risk-panel,
+.export-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+}
+
+.attendance-roster-search {
+    min-width: min(320px, 100%);
 }
 
 .risk-reason-list {
