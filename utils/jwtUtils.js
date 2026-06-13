@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
 /**
@@ -21,6 +22,25 @@ const generateToken = (payload, expiresIn = 86400) => {
     expiresIn,
     algorithm: 'HS256'
   });
+};
+
+/**
+ * Build a stable fingerprint for the current admin credentials.
+ * Any password or username change should invalidate existing JWTs.
+ * @returns {string}
+ */
+const getAdminCredentialVersion = () => {
+  const adminUsername = process.env.ADMIN_USERNAME;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+
+  if (!adminUsername || !adminPassword) {
+    throw new Error('Admin credentials not configured in environment');
+  }
+
+  return crypto
+    .createHash('sha256')
+    .update(`${adminUsername}:${adminPassword}`)
+    .digest('hex');
 };
 
 /**
@@ -59,5 +79,6 @@ const verifyAdminCredentials = (username, password) => {
 module.exports = {
   generateToken,
   verifyToken,
-  verifyAdminCredentials
+  verifyAdminCredentials,
+  getAdminCredentialVersion
 };

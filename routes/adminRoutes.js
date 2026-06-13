@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
-const { generateToken, verifyAdminCredentials } = require('../utils/jwtUtils');
+const { generateToken, verifyAdminCredentials, getAdminCredentialVersion } = require('../utils/jwtUtils');
 const ClassSession = require('../models/ClassSession');
 const Course = require('../models/Course');
 const ClassAccessRule = require('../models/ClassAccessRule');
@@ -348,7 +348,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    const token = generateToken({ username, role: 'admin' }, 86400);
+    const token = generateToken({
+      username,
+      role: 'admin',
+      credentialVersion: getAdminCredentialVersion()
+    }, 86400);
 
     return res.status(200).json({
       success: true,
@@ -683,6 +687,20 @@ router.get('/courses', authMiddleware, async (req, res) => {
     console.error('Error retrieving courses:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
+});
+
+/**
+ * GET /api/admin/validate
+ */
+router.get('/validate', authMiddleware, async (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: 'Session is valid',
+    admin: {
+      username: req.admin.username,
+      role: req.admin.role
+    }
+  });
 });
 
 /**

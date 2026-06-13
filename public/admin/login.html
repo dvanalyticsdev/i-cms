@@ -550,10 +550,32 @@
         applyTheme(document.documentElement.getAttribute('data-theme'));
         document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
 
-        // Check if already logged in
-        if (localStorage.getItem('adminToken')) {
-            window.location.href = '/admin/dashboard';
+        async function resumeExistingSession() {
+            const token = localStorage.getItem('adminToken');
+            if (!token) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/validate`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.ok) {
+                    window.location.href = '/admin/dashboard';
+                    return;
+                }
+            } catch (error) {
+                console.warn('Unable to validate existing admin session:', error);
+            }
+
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('adminUsername');
         }
+
+        resumeExistingSession();
     </script>
 </body>
 </html>

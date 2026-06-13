@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { getAdminCredentialVersion } = require('../utils/jwtUtils');
 
 /**
  * JWT Authentication Middleware
@@ -40,6 +41,17 @@ const authMiddleware = (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, jwtSecret);
+
+    if (decoded?.role === 'admin') {
+      const currentCredentialVersion = getAdminCredentialVersion();
+      if (!decoded.credentialVersion || decoded.credentialVersion !== currentCredentialVersion) {
+        return res.status(401).json({
+          success: false,
+          message: 'Session expired. Please log in again.'
+        });
+      }
+    }
+
     req.admin = decoded; // Attach admin info to request
     next();
 

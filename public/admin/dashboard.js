@@ -112,7 +112,7 @@ function formatSessionBatches(session) {
 // INITIALIZATION
 // ====================================
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initializeDashboardChrome();
 
     if (attendanceDemoMode) {
@@ -134,7 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
 
-    checkAuth();
+    const isAuthenticated = await checkAuth();
+    if (!isAuthenticated) {
+        return;
+    }
+
     restorePendingToast();
     setupEventListeners();
     syncPageHeader();
@@ -164,15 +168,37 @@ document.addEventListener('DOMContentLoaded', () => {
 /**
  * Check if user is authenticated
  */
-function checkAuth() {
+async function checkAuth() {
     authToken = localStorage.getItem('adminToken');
     if (!authToken) {
         window.location.href = '/admin/login';
-        return;
+        return false;
     }
 
-    const username = localStorage.getItem('adminUsername');
-    updateAdminIdentity(username || 'Admin');
+    try {
+        const response = await fetch(`${API_BASE_URL}/validate`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (!response.ok) {
+            logout();
+            return false;
+        }
+
+        const data = await response.json();
+        const username = data?.admin?.username || localStorage.getItem('adminUsername');
+        if (username) {
+            localStorage.setItem('adminUsername', username);
+        }
+        updateAdminIdentity(username || 'Admin');
+        return true;
+    } catch (error) {
+        console.error('Error validating admin session:', error);
+        logout();
+        return false;
+    }
 }
 
 function initializeDashboardChrome() {
