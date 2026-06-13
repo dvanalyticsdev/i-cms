@@ -32,16 +32,6 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log('DV Classroom Landing Page initialized');
 });
 
-window.addEventListener('beforeunload', () => {
-  if (!currentSession || !currentSession.lmsId || !navigator.sendBeacon) {
-    return;
-  }
-
-  const payload = JSON.stringify({ lmsId: currentSession.lmsId });
-  const blob = new Blob([payload], { type: 'application/json' });
-  navigator.sendBeacon(`${API_BASE_URL}/logout`, blob);
-});
-
 /**
  * Generate a unique device token for this browser session
  */
