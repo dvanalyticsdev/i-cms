@@ -10,7 +10,7 @@ const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
 const IssueReport = require('../models/IssueReport');
 const SessionLog = require('../models/SessionLog');
-const { logSessionActivity } = require('../utils/sessionLogger');
+const { logSessionActivity, getTimestampParts } = require('../utils/sessionLogger');
 const { sanitizeLmsId } = require('../utils/studentValidation');
 const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
 const { normalizePaymentStatus } = require('../utils/classAccess');
@@ -272,11 +272,23 @@ router.get('/session-logs', authMiddleware, async (req, res) => {
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
+    const normalizedLogs = logs.map(log => {
+      if (!log.timestamp) {
+        return log;
+      }
+
+      const formatted = getTimestampParts(new Date(log.timestamp));
+      return {
+        ...log,
+        date: formatted.date,
+        time: formatted.time
+      };
+    });
 
     return res.status(200).json({
       success: true,
       message: 'Session logs retrieved successfully',
-      logs,
+      logs: normalizedLogs,
       total,
       page,
       limit,

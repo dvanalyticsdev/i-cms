@@ -1309,8 +1309,8 @@ function renderSessionLogs() {
     sessionLogsList.innerHTML = allSessionLogs.map(log => `
         <tr>
             <td><strong>${escapeHtml(log.sessionName)}</strong></td>
-            <td>${escapeHtml(log.date)}</td>
-            <td>${escapeHtml(log.time)}</td>
+            <td>${escapeHtml(log.timestamp ? formatIndianSessionLogDate(log.timestamp) : log.date)}</td>
+            <td>${escapeHtml(log.timestamp ? formatIndianSessionLogTime(log.timestamp) : log.time)}</td>
             <td>${escapeHtml(log.userName)}</td>
             <td>${escapeHtml(log.actionPerformed)}</td>
             <td><span class="status-badge ${escapeHtml(String(log.status || '').toLowerCase())}">${escapeHtml(log.status)}</span></td>
@@ -3249,6 +3249,41 @@ function formatDuration(durationMinutes) {
     }
 
     return `${hours}h ${minutes}m`;
+}
+
+function formatIndianSessionLogDate(dateString) {
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) {
+        return '-';
+    }
+
+    const parts = new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(date);
+    const valueByType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+
+    return `${valueByType.year}-${valueByType.month}-${valueByType.day}`;
+}
+
+function formatIndianSessionLogTime(dateString) {
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) {
+        return '-';
+    }
+
+    const parts = new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+    }).formatToParts(date);
+    const valueByType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+
+    return `${valueByType.hour}:${valueByType.minute}:${valueByType.second} ${String(valueByType.dayPeriod || '').toUpperCase()}`.trim();
 }
 
 function formatDate(dateString) {

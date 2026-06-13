@@ -1,13 +1,22 @@
 const SessionLog = require('../models/SessionLog');
 
+const INDIAN_TIME_ZONE = 'Asia/Kolkata';
+
 function getTimestampParts(date = new Date()) {
-  const localDate = date.toLocaleDateString('en-CA');
-  const localTime = date.toLocaleTimeString('en-US', {
-    hour12: false,
+  const formatter = new Intl.DateTimeFormat('en-IN', {
+    timeZone: INDIAN_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit'
+    second: '2-digit',
+    hour12: true
   });
+  const parts = formatter.formatToParts(date);
+  const valueByType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const localDate = `${valueByType.year}-${valueByType.month}-${valueByType.day}`;
+  const localTime = `${valueByType.hour}:${valueByType.minute}:${valueByType.second} ${String(valueByType.dayPeriod || '').toUpperCase()}`.trim();
 
   return {
     date: localDate,
