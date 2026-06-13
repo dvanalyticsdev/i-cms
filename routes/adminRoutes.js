@@ -43,6 +43,18 @@ function parseCourseNames(courses) {
     .filter(Boolean);
 }
 
+function parseBatchNames(batches) {
+  const values = Array.isArray(batches) ? batches : [batches];
+
+  return Array.from(
+    new Set(
+      values
+        .map(batch => normalizeText(batch))
+        .filter(Boolean)
+    )
+  );
+}
+
 function escapeCsvValue(value) {
   const text = value === undefined || value === null ? '' : String(value);
   return `"${text.replace(/"/g, '""')}"`;
@@ -359,13 +371,13 @@ router.post('/session', authMiddleware, async (req, res) => {
       return;
     }
 
-    const { title, meetingNumber, passcode, description, courses, batch, mentorName, className } = req.body;
-    const normalizedBatch = normalizeText(batch);
+    const { title, meetingNumber, passcode, description, courses, batch, batches, mentorName, className } = req.body;
+    const normalizedBatches = parseBatchNames(batches !== undefined ? batches : batch);
     const normalizedMentorName = normalizeText(mentorName);
     const normalizedClassName = normalizeText(className);
 
-    if (!title || !meetingNumber || !passcode || !normalizedBatch || !normalizedMentorName || !normalizedClassName) {
-      return res.status(400).json({ success: false, message: 'Title, Meeting Number, Passcode, Batch, Mentor Name, and Class Name are required' });
+    if (!title || !meetingNumber || !passcode || normalizedBatches.length === 0 || !normalizedMentorName || !normalizedClassName) {
+      return res.status(400).json({ success: false, message: 'Title, Meeting Number, Passcode, at least one Batch, Mentor Name, and Class Name are required' });
     }
 
     const sanitizedMeetingNumber = meetingNumber.toString().replace(/\s/g, '');
@@ -386,7 +398,8 @@ router.post('/session', authMiddleware, async (req, res) => {
       description: (description || '').trim(),
       mentorName: normalizedMentorName,
       className: normalizedClassName,
-      batch: normalizedBatch,
+      batch: normalizedBatches[0],
+      batches: normalizedBatches,
       courses: normalizedCourses,
       status: 'on',
       createdBy: req.admin.username
@@ -453,8 +466,8 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
       return;
     }
 
-    const { title, meetingNumber, passcode, description, courses, batch, mentorName, className } = req.body;
-    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined && mentorName === undefined && className === undefined) {
+    const { title, meetingNumber, passcode, description, courses, batch, batches, mentorName, className } = req.body;
+    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined && batches === undefined && mentorName === undefined && className === undefined) {
       return res.status(400).json({ success: false, message: 'At least one field must be provided for update' });
     }
 
@@ -486,12 +499,13 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
       }
       updateData.className = normalizedClassName;
     }
-    if (batch !== undefined) {
-      const normalizedBatch = normalizeText(batch);
-      if (!normalizedBatch) {
-        return res.status(400).json({ success: false, message: 'Batch is required' });
+    if (batch !== undefined || batches !== undefined) {
+      const normalizedBatches = parseBatchNames(batches !== undefined ? batches : batch);
+      if (normalizedBatches.length === 0) {
+        return res.status(400).json({ success: false, message: 'At least one batch is required' });
       }
-      updateData.batch = normalizedBatch;
+      updateData.batch = normalizedBatches[0];
+      updateData.batches = normalizedBatches;
     }
     if (courses !== undefined) {
       const normalizedCourses = parseCourseNames(courses);

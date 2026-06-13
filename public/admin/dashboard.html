@@ -855,10 +855,18 @@
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Batch *</label>
-                        <select id="sessionBatch" class="form-input" required>
-                            <option value="">Select a batch</option>
-                        </select>
+                        <label class="form-label">Batch Selection *</label>
+                        <input
+                            type="text"
+                            id="sessionBatchSearch"
+                            class="form-input selection-search"
+                            placeholder="Search batches..."
+                            oninput="renderSessionBatchOptions()"
+                        >
+                        <div id="sessionBatchContainer" class="courses-container selection-list">
+                            <p style="color: #999; font-size: 12px;">Loading batches...</p>
+                        </div>
+                        <small class="form-hint">Select one or more batches for this session.</small>
                     </div>
 
                     <div class="modal-actions">

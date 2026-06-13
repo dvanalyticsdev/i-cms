@@ -23,6 +23,20 @@ function escapeRegex(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function getSessionBatches(session) {
+  if (Array.isArray(session?.batches) && session.batches.length > 0) {
+    return session.batches.map(batch => normalizeText(batch)).filter(Boolean);
+  }
+
+  const batch = normalizeText(session?.batch);
+  return batch ? [batch] : [];
+}
+
+function formatSessionBatch(session) {
+  const batches = getSessionBatches(session);
+  return batches.length > 0 ? batches.join(', ') : 'Unassigned';
+}
+
 function toStartOfDay(date) {
   const copy = new Date(date);
   copy.setHours(0, 0, 0, 0);
@@ -146,7 +160,7 @@ async function buildAttendanceSnapshot(query = {}) {
 
   const sessionQuery = {};
   if (query.batch) {
-    sessionQuery.batch = query.batch;
+    sessionQuery.$or = [{ batch: query.batch }, { batches: query.batch }];
   }
   if (query.course) {
     sessionQuery.courses = query.course;
@@ -169,11 +183,11 @@ async function buildAttendanceSnapshot(query = {}) {
       .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes')
       .sort({ attendedAt: 1 })
       .lean(),
-    ClassSession.find(sessionQuery).select('sessionId title mentorName className batch courses createdAt').sort({ createdAt: -1 }).lean()
+    ClassSession.find(sessionQuery).select('sessionId title mentorName className batch batches courses createdAt').sort({ createdAt: -1 }).lean()
   ]);
 
   const filteredSessions = sessions.filter((session) => {
-    if (query.batch && session.batch !== query.batch) {
+    if (query.batch && !getSessionBatches(session).includes(query.batch)) {
       return false;
     }
 
@@ -193,7 +207,7 @@ async function buildAttendanceSnapshot(query = {}) {
       const haystack = [
         session.sessionId,
         session.title,
-        session.batch,
+        formatSessionBatch(session),
         ...(Array.isArray(session.courses) ? session.courses : [])
       ]
         .filter(Boolean)
@@ -323,7 +337,7 @@ async function buildAttendanceSnapshot(query = {}) {
     return {
       sessionId: session.sessionId,
       sessionName: session.title,
-      batch: session.batch || 'Unassigned',
+      batch: formatSessionBatch(session),
       course: Array.isArray(session.courses) ? session.courses.join(', ') : '',
       mentorName: session.mentorName || '',
       className: session.className || '',

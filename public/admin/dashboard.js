@@ -50,6 +50,7 @@ let attendanceInsightsState = {
 };
 let attendanceInsightsLoading = false;
 let attendanceRosterSearchTimer = null;
+let sessionBatchSelection = new Set();
 const attendanceDemoData = {
     metrics: {
         totalStudents: 42,
@@ -92,6 +93,20 @@ const attendanceDemoData = {
         { lmsId: 'LMS2002', name: 'Rohan Das', phoneNumber: '9000055555', batch: 'Batch B', course: 'Node.js API', attendancePercentage: 45, presentSessions: 1, absentSessions: 1, lastAttendanceDate: '2026-06-05' }
     ]
 };
+
+function getSessionBatches(session) {
+    if (Array.isArray(session?.batches) && session.batches.length > 0) {
+        return Array.from(new Set(session.batches.map(batch => String(batch || '').trim()).filter(Boolean)));
+    }
+
+    const batch = String(session?.batch || '').trim();
+    return batch ? [batch] : [];
+}
+
+function formatSessionBatches(session) {
+    const batches = getSessionBatches(session);
+    return batches.length > 0 ? batches.join(', ') : '-';
+}
 
 // ====================================
 // INITIALIZATION
@@ -795,7 +810,7 @@ function renderSessions() {
         const courseDisplay = assignedCourses.length > 0
             ? assignedCourses.map(course => escapeHtml(course)).join(', ')
             : 'All Courses';
-        const batchDisplay = session.batch ? escapeHtml(session.batch) : '-';
+        const batchDisplay = escapeHtml(formatSessionBatches(session));
 
         return `
         <tr>
@@ -838,15 +853,16 @@ function updateStats() {
  */
 function openCreateSessionModal() {
     currentEditingSessionId = null;
+    sessionBatchSelection = new Set();
     document.getElementById('sessionId').value = '';
     document.getElementById('sessionTitle').value = '';
     document.getElementById('meetingNumber').value = '';
     document.getElementById('passcode').value = '';
     document.getElementById('description').value = '';
     document.getElementById('mentorName').value = '';
-    populateSessionBatchOptions();
+    document.getElementById('sessionBatchSearch').value = '';
+    renderSessionBatchOptions([]);
     populateSessionClassOptions();
-    document.getElementById('sessionBatch').value = '';
     document.getElementById('sessionClassName').value = '';
     renderCoursesCheckboxes([]); // Clear course selection
     document.getElementById('modalTitle').textContent = 'Create Session';
@@ -873,9 +889,10 @@ async function openEditSessionModal(sessionId) {
     document.getElementById('passcode').value = session.passcode;
     document.getElementById('description').value = session.description || '';
     document.getElementById('mentorName').value = session.mentorName || '';
-    populateSessionBatchOptions();
+    sessionBatchSelection = new Set(getSessionBatches(session));
+    document.getElementById('sessionBatchSearch').value = '';
+    renderSessionBatchOptions(getSessionBatches(session));
     populateSessionClassOptions();
-    document.getElementById('sessionBatch').value = session.batch || '';
     document.getElementById('sessionClassName').value = session.className || '';
     renderCoursesCheckboxes(session.courses || []); // Pre-select session's courses
     document.getElementById('modalTitle').textContent = 'Edit Session';
@@ -906,11 +923,11 @@ async function handleSaveSession(event) {
     const description = document.getElementById('description').value.trim();
     const mentorName = document.getElementById('mentorName').value.trim();
     const className = document.getElementById('sessionClassName').value.trim();
-    const batch = document.getElementById('sessionBatch').value.trim();
+    const batches = getSelectedSessionBatches();
     const courses = getSelectedCourses();
 
     // Validation
-    if (!title || !meetingNumber || !passcode || !batch || !mentorName || !className || courses.length === 0) {
+    if (!title || !meetingNumber || !passcode || batches.length === 0 || !mentorName || !className || courses.length === 0) {
         showToast('Please fill in all required fields', 'error');
         return;
     }
@@ -942,7 +959,8 @@ async function handleSaveSession(event) {
                 description,
                 mentorName,
                 className,
-                batch,
+                batch: batches[0] || '',
+                batches,
                 courses
             })
         });
@@ -2563,21 +2581,51 @@ function populateAttendanceFilterOptions() {
     }
 }
 
-function populateSessionBatchOptions() {
-    const select = document.getElementById('sessionBatch');
-    if (!select) {
+function getSelectedSessionBatches() {
+    return Array.from(sessionBatchSelection);
+}
+
+function toggleSessionBatchSelection(input) {
+    const value = input?.value?.trim();
+    if (!value) {
         return;
     }
 
-    const currentValue = select.value;
-    select.innerHTML = '<option value="">Select a batch</option>';
-    Array.from(new Set(availableBatches)).sort().forEach(batch => {
-        const option = document.createElement('option');
-        option.value = batch;
-        option.textContent = batch;
-        select.appendChild(option);
-    });
-    select.value = currentValue;
+    if (input.checked) {
+        sessionBatchSelection.add(value);
+    } else {
+        sessionBatchSelection.delete(value);
+    }
+}
+
+function populateSessionBatchOptions() {
+    renderSessionBatchOptions();
+}
+
+function renderSessionBatchOptions(selectedBatches = null) {
+    const container = document.getElementById('sessionBatchContainer');
+    if (!container) {
+        return;
+    }
+
+    const selectedSet = new Set(selectedBatches || getSelectedSessionBatches());
+    sessionBatchSelection = new Set(selectedSet);
+    const searchTerm = (document.getElementById('sessionBatchSearch')?.value || '').trim().toLowerCase();
+    const batches = Array.from(new Set(availableBatches))
+        .sort((left, right) => left.localeCompare(right))
+        .filter(batch => !searchTerm || batch.toLowerCase().includes(searchTerm));
+
+    if (batches.length === 0) {
+        container.innerHTML = '<p style="color: #999; font-size: 12px;">No batches match your search.</p>';
+        return;
+    }
+
+    container.innerHTML = batches.map(batch => `
+        <label class="course-checkbox">
+            <input type="checkbox" value="${escapeHtml(batch)}" ${selectedSet.has(batch) ? 'checked' : ''} onchange="toggleSessionBatchSelection(this)">
+            <span>${escapeHtml(batch)}</span>
+        </label>
+    `).join('');
 }
 
 function collectAttendanceFilters() {

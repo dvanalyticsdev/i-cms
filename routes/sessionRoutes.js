@@ -9,6 +9,15 @@ const { generateZoomSignature } = require('../utils/zoomSignature');
 const { finalizeAttendanceForActiveSession, recordSessionJoin } = require('../utils/attendanceTracker');
 const { mapRulesByKey, isClassAccessible } = require('../utils/classAccess');
 
+function getSessionBatches(session) {
+  if (Array.isArray(session?.batches) && session.batches.length > 0) {
+    return session.batches.map(batch => String(batch || '').trim()).filter(Boolean);
+  }
+
+  const batch = String(session?.batch || '').trim();
+  return batch ? [batch] : [];
+}
+
 /**
  * GET /api/class-sessions
  */
@@ -48,12 +57,13 @@ router.get('/class-sessions', async (req, res) => {
     
     if (studentCourse) {
       const allSessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch mentorName className')
+        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch batches mentorName className')
         .sort({ updatedAt: -1 })
         .lean();
       
       const filteredSessions = allSessions.filter(session => {
-        if (studentBatch && session.batch && session.batch !== studentBatch) {
+        const sessionBatches = getSessionBatches(session);
+        if (studentBatch && sessionBatches.length > 0 && !sessionBatches.includes(studentBatch)) {
           return false;
         }
         if (studentRecord && session.className) {
@@ -80,7 +90,7 @@ router.get('/class-sessions', async (req, res) => {
       });
     } else {
       const sessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch mentorName className')
+        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch batches mentorName className')
         .sort({ updatedAt: -1 })
         .lean();
 
@@ -149,7 +159,8 @@ router.post('/join-session', async (req, res) => {
     try {
       if (lmsId) {
         const student = await Student.findOne({ lmsId }).lean();
-        if (student && session.batch && student.batch && session.batch !== student.batch) {
+        const sessionBatches = getSessionBatches(session);
+        if (student && student.batch && sessionBatches.length > 0 && !sessionBatches.includes(student.batch)) {
           return res.status(403).json({
             success: false,
             message: 'This session is assigned to a different batch'

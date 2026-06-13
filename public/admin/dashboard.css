@@ -1105,6 +1105,16 @@ body {
     border-radius: 4px;
 }
 
+.selection-search {
+    margin-bottom: 8px;
+}
+
+.selection-list {
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+}
+
 .pagination {
     display: flex;
     gap: 8px;
