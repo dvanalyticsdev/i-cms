@@ -604,6 +604,7 @@ function setupEventListeners() {
     }
 
     setupClassAccessScrolling();
+    setupAttendanceDetailScrolling();
 
     document.addEventListener('click', (event) => {
         const utilityMenu = document.getElementById('utilityMenu');
@@ -657,6 +658,50 @@ function setupClassAccessScrolling() {
         if (event.key === 'ArrowRight') {
             event.preventDefault();
             scrollByAmount(1);
+        }
+    });
+}
+
+function setupAttendanceDetailScrolling() {
+    const scrollRegion = document.getElementById('attendanceDetailScrollRegion');
+
+    if (!scrollRegion) {
+        return;
+    }
+
+    const scrollByAmount = (direction) => {
+        const amount = Math.max(180, Math.floor(scrollRegion.clientWidth * 0.55));
+        scrollRegion.scrollBy({
+            left: direction * amount,
+            behavior: 'smooth'
+        });
+    };
+
+    scrollRegion.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            scrollByAmount(-1);
+        }
+
+        if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            scrollByAmount(1);
+        }
+
+        if (event.key === 'Home') {
+            event.preventDefault();
+            scrollRegion.scrollTo({
+                left: 0,
+                behavior: 'smooth'
+            });
+        }
+
+        if (event.key === 'End') {
+            event.preventDefault();
+            scrollRegion.scrollTo({
+                left: scrollRegion.scrollWidth,
+                behavior: 'smooth'
+            });
         }
     });
 }
