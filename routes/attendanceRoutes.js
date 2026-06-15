@@ -150,7 +150,30 @@ function resolveDurationMinutes(record) {
     return Math.round((baseMinutes + (currentSegmentMs / 60000)) * 10) / 10;
   }
 
-  return Math.round(baseMinutes * 10) / 10;
+  if (baseMinutes > 0) {
+    return Math.round(baseMinutes * 10) / 10;
+  }
+
+  const endCandidates = [record.leftAt, record.lastSeenAt]
+    .map((value) => (value ? new Date(value) : null))
+    .filter((value) => value && !Number.isNaN(value.getTime()));
+  const endedAt = endCandidates.sort((left, right) => right.getTime() - left.getTime())[0] || null;
+
+  if (!endedAt) {
+    return 0;
+  }
+
+  const startCandidates = [record.attendedAt, record.firstJoinedAt]
+    .map((value) => (value ? new Date(value) : null))
+    .filter((value) => value && !Number.isNaN(value.getTime()))
+    .filter((value) => value.getTime() <= endedAt.getTime());
+
+  const startedAt = startCandidates.sort((left, right) => left.getTime() - right.getTime())[0] || null;
+  if (!startedAt) {
+    return 0;
+  }
+
+  return Math.round((Math.max(endedAt.getTime() - startedAt.getTime(), 0) / 60000) * 10) / 10;
 }
 
 async function buildAttendanceSnapshot(query = {}) {
