@@ -328,7 +328,7 @@ body {
 
 .attendance-panels {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(320px, 0.92fr) minmax(560px, 1.08fr);
     gap: 18px;
     align-items: stretch;
 }
@@ -339,10 +339,17 @@ body {
 
 .attendance-detail-table-container {
     overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
 }
 
 .attendance-detail-table {
     min-width: 840px;
+}
+
+.attendance-detail-table-container:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
 }
 
 .attendance-detail-table th,
@@ -372,12 +379,12 @@ body {
 
 .attendance-detail-table th:nth-child(5),
 .attendance-detail-table td:nth-child(5) {
-    min-width: 130px;
+    min-width: 150px;
 }
 
 .attendance-detail-table th:nth-child(6),
 .attendance-detail-table td:nth-child(6) {
-    min-width: 90px;
+    min-width: 110px;
     white-space: nowrap;
 }
 
@@ -385,6 +392,12 @@ body {
 .attendance-detail-table td:nth-child(7) {
     min-width: 90px;
     white-space: nowrap;
+}
+
+@media (max-width: 1360px) {
+    .attendance-panels {
+        grid-template-columns: 1fr;
+    }
 }
 
 .attendance-session-row {
