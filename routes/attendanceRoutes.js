@@ -562,7 +562,7 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
     const attendanceMatch = buildAttendanceMatch({ ...req.query, sessionId }, window);
     const allRecords = await AttendanceRecord.find(attendanceMatch)
-      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status')
+      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes')
       .sort({ attendedAt: 1 })
       .lean();
 
