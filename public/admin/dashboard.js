@@ -3130,7 +3130,18 @@ function renderAttendanceRiskTable() {
     const riskList = document.getElementById('attendanceRiskList');
     if (!riskList) return;
 
-    const records = attendanceInsightsState.sessionSummaries || [];
+    const records = [...(attendanceInsightsState.sessionSummaries || [])].sort((left, right) => {
+        const leftDate = String(left?.attendanceDate || '');
+        const rightDate = String(right?.attendanceDate || '');
+
+        if (leftDate !== rightDate) {
+            return rightDate.localeCompare(leftDate);
+        }
+
+        return String(left?.sessionName || left?.sessionId || '').localeCompare(
+            String(right?.sessionName || right?.sessionId || '')
+        );
+    });
     if (records.length === 0) {
         riskList.innerHTML = `
             <tr>
@@ -3143,6 +3154,7 @@ function renderAttendanceRiskTable() {
     riskList.innerHTML = records.map(session => `
         <tr class="attendance-session-row" onclick="viewAttendance('${escapeHtml(session.sessionId)}', true, 1, '${escapeHtml(session.attendanceDate || '')}')" role="button" tabindex="0" onkeydown="if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); viewAttendance('${escapeHtml(session.sessionId)}', true, 1, '${escapeHtml(session.attendanceDate || '')}'); }">
             <td class="attendance-session-cell">
+                <div class="attendance-session-date">${escapeHtml(formatAttendanceDay(session.attendanceDate))}</div>
                 <div class="attendance-session-title">${escapeHtml(session.sessionName || session.sessionId)}</div>
                 <div class="attendance-session-meta">${escapeHtml(session.sessionId)}</div>
                 <div class="attendance-session-meta">${escapeHtml(session.className || '-')} • ${escapeHtml(session.mentorName || '-')}</div>
@@ -3151,7 +3163,7 @@ function renderAttendanceRiskTable() {
                 ${renderSummaryLine('Batches', getSessionBatches(session), 3)}
                 ${renderSummaryLine('Courses', String(session.course || '').split(',').map(item => item.trim()).filter(Boolean), 2, '-')}
             </td>
-            <td>${session.attendanceDate ? escapeHtml(session.attendanceDate) : '-'}</td>
+            <td class="attendance-date-cell">${escapeHtml(formatAttendanceDay(session.attendanceDate))}</td>
             <td><strong>${escapeHtml(String(session.uniqueStudents ?? session.presentCount ?? 0))}</strong></td>
             <td class="attendance-session-actions">
                 <button class="btn btn-secondary" onclick="event.stopPropagation(); viewAttendance('${escapeHtml(session.sessionId)}', true, 1, '${escapeHtml(session.attendanceDate || '')}')">View Attendance</button>
@@ -3623,6 +3635,28 @@ function formatAttendanceDateTime(dateString) {
         day: '2-digit',
         hour: '2-digit',
         minute: '2-digit'
+    });
+}
+
+function formatAttendanceDay(dateString) {
+    if (!dateString) {
+        return '-';
+    }
+
+    const normalizedValue = /^\d{4}-\d{2}-\d{2}$/.test(String(dateString).trim())
+        ? `${String(dateString).trim()}T00:00:00`
+        : dateString;
+    const date = new Date(normalizedValue);
+
+    if (Number.isNaN(date.getTime())) {
+        return String(dateString);
+    }
+
+    return date.toLocaleDateString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
     });
 }
 

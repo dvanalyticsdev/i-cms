@@ -413,6 +413,19 @@ body {
     min-width: 260px;
 }
 
+.attendance-session-date {
+    display: inline-flex;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(43, 108, 176, 0.1);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+}
+
 .attendance-session-title {
     font-weight: 600;
     color: var(--text-primary);
@@ -427,6 +440,11 @@ body {
 
 .attendance-session-actions {
     white-space: nowrap;
+}
+
+.attendance-date-cell {
+    white-space: nowrap;
+    font-weight: 500;
 }
 
 .attendance-roster-panel {
