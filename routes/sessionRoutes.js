@@ -191,7 +191,10 @@ router.post('/join-session', async (req, res) => {
 
         await ActiveSession.updateOne(
           { lmsId: lmsId, status: 'active' },
-          { $set: { classSessionId: session.sessionId, meetingNumber: session.meetingNumber, joinedAt: new Date(), endedAt: null } }
+          (() => {
+            const joinedAt = new Date();
+            return { $set: { classSessionId: session.sessionId, meetingNumber: session.meetingNumber, joinedAt, lastSeenAt: joinedAt, endedAt: null } };
+          })()
         );
 
         if (student) {

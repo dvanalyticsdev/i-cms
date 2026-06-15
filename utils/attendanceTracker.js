@@ -5,6 +5,15 @@ function roundMinutes(ms) {
   return Math.round((Math.max(ms, 0) / 60000) * 10) / 10;
 }
 
+function toValidDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 async function recordSessionJoin({
   lmsId,
   studentName,
@@ -106,14 +115,25 @@ async function finalizeAttendanceForActiveSession(activeSession, endedAt = new D
     return null;
   }
 
-  const currentJoinStartedAt = record.currentJoinStartedAt || activeSession.joinedAt || record.firstJoinedAt;
-  if (currentJoinStartedAt) {
-    const segmentMinutes = roundMinutes(new Date(endedAt).getTime() - new Date(currentJoinStartedAt).getTime());
+  const endedAtDate = toValidDate(endedAt) || new Date();
+  const startCandidates = [
+    toValidDate(record.currentJoinStartedAt),
+    toValidDate(activeSession.joinedAt),
+    toValidDate(record.attendedAt),
+    toValidDate(record.firstJoinedAt)
+  ].filter(Boolean);
+  const validStartCandidates = startCandidates.filter((date) => date.getTime() <= endedAtDate.getTime());
+  const segmentStart = validStartCandidates.length > 0
+    ? validStartCandidates.sort((left, right) => right.getTime() - left.getTime())[0]
+    : null;
+
+  if (segmentStart) {
+    const segmentMinutes = roundMinutes(endedAtDate.getTime() - segmentStart.getTime());
     record.durationMinutes = Math.max(Number(record.durationMinutes || 0), 0) + segmentMinutes;
   }
 
-  record.lastSeenAt = endedAt;
-  record.leftAt = endedAt;
+  record.lastSeenAt = endedAtDate;
+  record.leftAt = endedAtDate;
   record.currentJoinStartedAt = null;
   await record.save();
   return record.toObject();
