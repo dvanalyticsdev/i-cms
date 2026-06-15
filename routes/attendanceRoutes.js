@@ -154,22 +154,22 @@ function resolveDurationMinutes(record) {
     return Math.round(baseMinutes * 10) / 10;
   }
 
-  const endCandidates = [record.leftAt, record.lastSeenAt]
+  const startCandidates = [record.attendedAt, record.firstJoinedAt, record.createdAt]
     .map((value) => (value ? new Date(value) : null))
     .filter((value) => value && !Number.isNaN(value.getTime()));
-  const endedAt = endCandidates.sort((left, right) => right.getTime() - left.getTime())[0] || null;
+  const startedAt = startCandidates.sort((left, right) => left.getTime() - right.getTime())[0] || null;
 
-  if (!endedAt) {
+  if (!startedAt) {
     return 0;
   }
 
-  const startCandidates = [record.attendedAt, record.firstJoinedAt]
+  const endCandidates = [record.leftAt, record.lastSeenAt, record.updatedAt]
     .map((value) => (value ? new Date(value) : null))
     .filter((value) => value && !Number.isNaN(value.getTime()))
-    .filter((value) => value.getTime() <= endedAt.getTime());
+    .filter((value) => value.getTime() >= startedAt.getTime());
+  const endedAt = endCandidates.sort((left, right) => right.getTime() - left.getTime())[0] || null;
 
-  const startedAt = startCandidates.sort((left, right) => left.getTime() - right.getTime())[0] || null;
-  if (!startedAt) {
+  if (!endedAt) {
     return 0;
   }
 
@@ -203,7 +203,7 @@ async function buildAttendanceSnapshot(query = {}) {
   const [students, attendanceRecords, sessions] = await Promise.all([
     Student.find(studentQuery).select('lmsId name mobile batch course createdAt').lean(),
     AttendanceRecord.find(attendanceMatch)
-      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes')
+      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
       .sort({ attendedAt: 1 })
       .lean(),
     ClassSession.find(sessionQuery).select('sessionId title mentorName className batch batches courses createdAt').sort({ createdAt: -1 }).lean()
@@ -585,7 +585,7 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
     const attendanceMatch = buildAttendanceMatch({ ...req.query, sessionId }, window);
     const allRecords = await AttendanceRecord.find(attendanceMatch)
-      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes')
+      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
       .sort({ attendedAt: 1 })
       .lean();
 
