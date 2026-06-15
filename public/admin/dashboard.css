@@ -447,6 +447,35 @@ body {
     font-size: 14px;
 }
 
+.session-access-cell {
+    min-width: 320px;
+}
+
+.session-access-primary {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.session-access-meta {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.session-access-line {
+    display: block;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    white-space: normal;
+    word-break: break-word;
+}
+
+.session-access-line strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
 .issue-description {
     max-width: 520px;
     white-space: normal;

@@ -108,6 +108,35 @@ function formatSessionBatches(session) {
     return batches.length > 0 ? batches.join(', ') : '-';
 }
 
+function summarizeSessionAccessList(items, maxVisible = 4) {
+    const normalizedItems = Array.from(new Set(
+        (Array.isArray(items) ? items : [])
+            .map(item => String(item || '').trim())
+            .filter(Boolean)
+    ));
+
+    if (normalizedItems.length === 0) {
+        return {
+            summary: '-',
+            fullText: '-'
+        };
+    }
+
+    if (normalizedItems.length <= maxVisible) {
+        const fullText = normalizedItems.join(', ');
+        return {
+            summary: fullText,
+            fullText
+        };
+    }
+
+    const visibleItems = normalizedItems.slice(0, maxVisible).join(', ');
+    return {
+        summary: `${visibleItems} +${normalizedItems.length - maxVisible} more`,
+        fullText: normalizedItems.join(', ')
+    };
+}
+
 function isAllowedPosterFile(file) {
     if (!file) {
         return false;
@@ -909,16 +938,34 @@ function renderSessions() {
 
     sessionsList.innerHTML = allSessions.map(session => {
         const assignedCourses = Array.isArray(session.courses) ? session.courses : [];
-        const courseDisplay = assignedCourses.length > 0
-            ? assignedCourses.map(course => escapeHtml(course)).join(', ')
+        const batches = getSessionBatches(session);
+        const batchSummary = summarizeSessionAccessList(batches, 4);
+        const courseSummary = summarizeSessionAccessList(assignedCourses, 3);
+        const className = escapeHtml(session.className || '-');
+        const batchSummaryText = escapeHtml(batchSummary.summary);
+        const batchFullText = escapeHtml(batchSummary.fullText);
+        const courseSummaryText = assignedCourses.length > 0
+            ? escapeHtml(courseSummary.summary)
             : 'All Courses';
-        const batchDisplay = escapeHtml(formatSessionBatches(session));
+        const courseFullText = assignedCourses.length > 0
+            ? escapeHtml(courseSummary.fullText)
+            : 'All Courses';
 
         return `
         <tr>
             <td>${escapeHtml(session.title)}</td>
             <td>${renderCodeChip(session.meetingNumber)}</td>
-            <td>${escapeHtml(session.className || '-')}<br><span style="color: #999; font-size: 12px;">${batchDisplay} | ${courseDisplay}</span></td>
+            <td class="session-access-cell">
+                <div class="session-access-primary">${className}</div>
+                <div class="session-access-meta">
+                    <span class="session-access-line" title="${batchFullText}">
+                        <strong>Batches:</strong> ${batchSummaryText}
+                    </span>
+                    <span class="session-access-line" title="${courseFullText}">
+                        <strong>Courses:</strong> ${courseSummaryText}
+                    </span>
+                </div>
+            </td>
             <td>${escapeHtml(session.mentorName || '-')}</td>
             <td>
                 <button class="btn-toggle ${session.status}" onclick="toggleSessionStatus('${session._id}', '${session.status}')">
