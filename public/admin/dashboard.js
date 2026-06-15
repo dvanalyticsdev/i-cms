@@ -159,6 +159,10 @@ function renderSummaryLine(label, items, maxVisible = 4, fallback = '-') {
     `;
 }
 
+function buildAttendanceOccurrenceKey(sessionId, attendanceDate) {
+    return `${String(sessionId || '').trim()}__${String(attendanceDate || '').trim()}`;
+}
+
 function isAllowedPosterFile(file) {
     if (!file) {
         return false;
@@ -3004,7 +3008,12 @@ async function loadAttendanceInsights(page = 1) {
             const limit = 10;
             const total = sessions.length;
             const totalPages = Math.max(Math.ceil(total / limit), 1);
-            const pageItems = sessions.slice((page - 1) * limit, page * limit);
+            const pageItems = sessions
+                .slice((page - 1) * limit, page * limit)
+                .map(session => ({
+                    ...session,
+                    occurrenceKey: buildAttendanceOccurrenceKey(session.sessionId, session.attendanceDate || '')
+                }));
 
             attendanceInsightsState = {
                 metrics: {
@@ -3022,8 +3031,8 @@ async function loadAttendanceInsights(page = 1) {
             };
 
             renderAttendanceInsights();
-            if (filters.sessionId) {
-                await viewAttendance(filters.sessionId, false);
+            if (filters.sessionId && pageItems.length === 1) {
+                await viewAttendance(pageItems[0].sessionId, false, 1, pageItems[0].attendanceDate || '');
             }
             return;
         }
@@ -3073,11 +3082,12 @@ async function loadAttendanceInsights(page = 1) {
 
         renderAttendanceInsights();
 
-        if (filters.sessionId) {
-            await viewAttendance(filters.sessionId, false);
-        } else if (attendanceInsightsState.selectedSession?.sessionId) {
+        if (filters.sessionId && attendanceInsightsState.sessionSummaries.length === 1) {
+            const [onlySession] = attendanceInsightsState.sessionSummaries;
+            await viewAttendance(onlySession.sessionId, false, 1, onlySession.attendanceDate || '');
+        } else if (attendanceInsightsState.selectedSession?.occurrenceKey) {
             const stillVisible = (attendanceInsightsState.sessionSummaries || []).some(
-                session => session.sessionId === attendanceInsightsState.selectedSession.sessionId
+                session => session.occurrenceKey === attendanceInsightsState.selectedSession.occurrenceKey
             );
             if (!stillVisible) {
                 clearAttendanceDetailState();
@@ -3131,7 +3141,7 @@ function renderAttendanceRiskTable() {
     }
 
     riskList.innerHTML = records.map(session => `
-        <tr class="attendance-session-row" onclick="viewAttendance('${escapeHtml(session.sessionId)}')" role="button" tabindex="0" onkeydown="if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); viewAttendance('${escapeHtml(session.sessionId)}'); }">
+        <tr class="attendance-session-row" onclick="viewAttendance('${escapeHtml(session.sessionId)}', true, 1, '${escapeHtml(session.attendanceDate || '')}')" role="button" tabindex="0" onkeydown="if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); viewAttendance('${escapeHtml(session.sessionId)}', true, 1, '${escapeHtml(session.attendanceDate || '')}'); }">
             <td class="attendance-session-cell">
                 <div class="attendance-session-title">${escapeHtml(session.sessionName || session.sessionId)}</div>
                 <div class="attendance-session-meta">${escapeHtml(session.sessionId)}</div>
@@ -3144,13 +3154,13 @@ function renderAttendanceRiskTable() {
             <td>${session.attendanceDate ? escapeHtml(session.attendanceDate) : '-'}</td>
             <td><strong>${escapeHtml(String(session.uniqueStudents ?? session.presentCount ?? 0))}</strong></td>
             <td class="attendance-session-actions">
-                <button class="btn btn-secondary" onclick="event.stopPropagation(); viewAttendance('${escapeHtml(session.sessionId)}')">View Attendance</button>
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); viewAttendance('${escapeHtml(session.sessionId)}', true, 1, '${escapeHtml(session.attendanceDate || '')}')">View Attendance</button>
             </td>
         </tr>
     `).join('');
 }
 
-async function viewAttendance(sessionId, showLoadingState = true, page = 1) {
+async function viewAttendance(sessionId, showLoadingState = true, page = 1, attendanceDate = '') {
     if (!sessionId) {
         return;
     }
@@ -3183,14 +3193,19 @@ async function viewAttendance(sessionId, showLoadingState = true, page = 1) {
 
     try {
         if (attendanceDemoMode) {
-            const session = attendanceDemoData.sessionSummaries.find(item => item.sessionId === sessionId) || { sessionId, sessionName: sessionId };
+            const session = attendanceDemoData.sessionSummaries.find(item => item.sessionId === sessionId && (!attendanceDate || item.attendanceDate === attendanceDate))
+                || attendanceDemoData.sessionSummaries.find(item => item.sessionId === sessionId)
+                || { sessionId, sessionName: sessionId, attendanceDate };
             const allRecords = attendanceDemoData.sessionAttendance[sessionId] || [];
             const limit = 30;
             const total = allRecords.length;
             const totalPages = Math.max(Math.ceil(total / limit), 1);
             const safePage = Math.min(Math.max(page, 1), totalPages);
 
-            attendanceInsightsState.selectedSession = session;
+            attendanceInsightsState.selectedSession = {
+                ...session,
+                occurrenceKey: buildAttendanceOccurrenceKey(session.sessionId, session.attendanceDate || attendanceDate || '')
+            };
             attendanceInsightsState.sessionAttendance = allRecords.slice((safePage - 1) * limit, safePage * limit);
             attendanceInsightsState.detailPagination = { page: safePage, limit, total, totalPages };
             renderAttendanceDetailTable();
@@ -3205,7 +3220,8 @@ async function viewAttendance(sessionId, showLoadingState = true, page = 1) {
             to: filters.to,
             batch: filters.batch,
             course: filters.course,
-            mentorName: filters.mentorName
+            mentorName: filters.mentorName,
+            attendanceDate
         });
 
         const response = await fetch(`${API_BASE_URL}/attendance/session/${encodeURIComponent(sessionId)}?${params.toString()}`, {
@@ -3250,10 +3266,55 @@ function clearAttendanceDetailState() {
     renderAttendanceDetailTable();
 }
 
+async function clearSelectedAttendanceOccurrence() {
+    const session = attendanceInsightsState.selectedSession;
+    const attendanceDate = session?.attendanceDate || '';
+    const sessionId = session?.sessionId || '';
+
+    if (!sessionId || !attendanceDate) {
+        showToast('Select a dated session occurrence first', 'error');
+        return;
+    }
+
+    const confirmed = confirm(`Clear attendance for "${session.sessionName || sessionId}" on ${attendanceDate}? This will remove all student attendance records for that date.`);
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const params = new URLSearchParams({ attendanceDate });
+        const response = await fetch(`${API_BASE_URL}/attendance/session/${encodeURIComponent(sessionId)}/occurrence?${params.toString()}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to clear attendance');
+        }
+
+        showToast(data.message || 'Attendance cleared successfully', 'success');
+        clearAttendanceDetailState();
+        await loadAttendanceInsights(1);
+        await loadAttendanceRoster(1);
+    } catch (error) {
+        console.error('Error clearing attendance occurrence:', error);
+        showToast(error.message || 'Failed to clear attendance', 'error');
+    }
+}
+
 function renderAttendanceDetailTable() {
     const detailMeta = document.getElementById('attendanceDetailMeta');
     const detailList = document.getElementById('attendanceDetailList');
     const detailPagination = document.getElementById('attendanceDetailPagination');
+    const clearButton = document.getElementById('clearAttendanceOccurrenceButton');
     if (!detailMeta || !detailList) return;
 
     const session = attendanceInsightsState.selectedSession;
@@ -3267,15 +3328,23 @@ function renderAttendanceDetailTable() {
                 <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
             </tr>
         `;
+        if (clearButton) {
+            clearButton.classList.add('hidden');
+        }
         if (detailPagination) {
             detailPagination.innerHTML = '';
         }
         return;
     }
 
+    if (clearButton) {
+        clearButton.classList.toggle('hidden', !session.attendanceDate);
+    }
+
     const start = pagination.total === 0 ? 0 : ((pagination.page - 1) * pagination.limit) + 1;
     const end = pagination.total === 0 ? 0 : Math.min(start + records.length - 1, pagination.total);
-    detailMeta.textContent = `${session.sessionName || session.sessionId} • ${pagination.total || 0} student(s) joined${pagination.total > pagination.limit ? ` • Showing ${start}-${end}` : ''}`;
+    const attendanceDateLabel = session.attendanceDate ? ` • ${escapeHtml(session.attendanceDate)}` : '';
+    detailMeta.textContent = `${session.sessionName || session.sessionId}${attendanceDateLabel} • ${pagination.total || 0} student(s) joined${pagination.total > pagination.limit ? ` • Showing ${start}-${end}` : ''}`;
 
     if (records.length === 0) {
         detailList.innerHTML = `
@@ -3307,6 +3376,7 @@ function renderAttendanceDetailTable() {
 function renderAttendanceDetailPagination() {
     const container = document.getElementById('attendanceDetailPagination');
     const sessionId = attendanceInsightsState.selectedSession?.sessionId;
+    const attendanceDate = attendanceInsightsState.selectedSession?.attendanceDate || '';
     const pagination = attendanceInsightsState.detailPagination || { page: 1, totalPages: 1 };
 
     if (!container || !sessionId) return;
@@ -3320,17 +3390,17 @@ function renderAttendanceDetailPagination() {
     }
 
     const buttons = [];
-    buttons.push(`<button class="pagination-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="viewAttendance('${escapeHtml(sessionId)}', false, ${currentPage - 1})">Prev</button>`);
+    buttons.push(`<button class="pagination-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="viewAttendance('${escapeHtml(sessionId)}', false, ${currentPage - 1}, '${escapeHtml(attendanceDate)}')">Prev</button>`);
 
     for (let page = 1; page <= totalPages; page++) {
         if (page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1) {
-            buttons.push(`<button class="pagination-btn ${page === currentPage ? 'active' : ''}" onclick="viewAttendance('${escapeHtml(sessionId)}', false, ${page})">${page}</button>`);
+            buttons.push(`<button class="pagination-btn ${page === currentPage ? 'active' : ''}" onclick="viewAttendance('${escapeHtml(sessionId)}', false, ${page}, '${escapeHtml(attendanceDate)}')">${page}</button>`);
         } else if (page === currentPage - 2 || page === currentPage + 2) {
             buttons.push('<span style="padding: 8px 4px; color: #999;">...</span>');
         }
     }
 
-    buttons.push(`<button class="pagination-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="viewAttendance('${escapeHtml(sessionId)}', false, ${currentPage + 1})">Next</button>`);
+    buttons.push(`<button class="pagination-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="viewAttendance('${escapeHtml(sessionId)}', false, ${currentPage + 1}, '${escapeHtml(attendanceDate)}')">Next</button>`);
     container.innerHTML = buttons.join('');
 }
 

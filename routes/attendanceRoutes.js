@@ -107,6 +107,9 @@ function buildAttendanceMatch(query = {}, window = {}) {
   if (query.sessionId) {
     attendanceMatch.sessionId = query.sessionId;
   }
+  if (query.attendanceDate) {
+    attendanceMatch.attendanceDate = query.attendanceDate;
+  }
   return attendanceMatch;
 }
 
@@ -141,6 +144,14 @@ function buildSectionRows(sectionName, records) {
     section: sectionName,
     ...record
   }));
+}
+
+function resolveAttendanceDate(record) {
+  return normalizeText(record?.attendanceDate) || formatDateValue(record?.attendedAt) || formatDateValue(record?.createdAt) || '';
+}
+
+function buildOccurrenceKey(sessionId, attendanceDate) {
+  return `${normalizeText(sessionId)}__${normalizeText(attendanceDate || 'undated')}`;
 }
 
 function resolveDurationMinutes(record) {
@@ -194,11 +205,6 @@ async function buildAttendanceSnapshot(query = {}) {
   if (query.mentorName) {
     sessionQuery.mentorName = query.mentorName;
   }
-  if (window.start || window.end) {
-    sessionQuery.createdAt = {};
-    if (window.start) sessionQuery.createdAt.$gte = window.start;
-    if (window.end) sessionQuery.createdAt.$lte = window.end;
-  }
 
   const [students, attendanceRecords, sessions] = await Promise.all([
     Student.find(studentQuery).select('lmsId name mobile batch course createdAt').lean(),
@@ -225,56 +231,94 @@ async function buildAttendanceSnapshot(query = {}) {
       return false;
     }
 
-    if (query.search) {
-      const search = query.search.trim().toLowerCase();
-      const haystack = [
-        session.sessionId,
-        session.title,
-        formatSessionBatch(session),
-        ...(Array.isArray(session.courses) ? session.courses : [])
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-
-      if (!haystack.includes(search)) {
-        return false;
-      }
-    }
-
-    if (window.start || window.end) {
-      const createdAt = session.createdAt ? new Date(session.createdAt) : null;
-      if (!createdAt || Number.isNaN(createdAt.getTime())) {
-        return false;
-      }
-      if (window.start && createdAt < window.start) {
-        return false;
-      }
-      if (window.end && createdAt > window.end) {
-        return false;
-      }
-    }
-
     return true;
   });
 
   const sessionsById = new Map(filteredSessions.map((session) => [session.sessionId, session]));
   const relevantSessionIds = new Set(filteredSessions.map((session) => session.sessionId));
   const relevantAttendanceRecords = attendanceRecords.filter((record) => relevantSessionIds.has(record.sessionId));
-  const sessionTimeline = filteredSessions
-    .slice()
-    .sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt))
-    .map((session) => session.sessionId);
 
-  const sessionsConducted = sessionTimeline.length;
+  const occurrenceMap = new Map();
+  relevantAttendanceRecords.forEach((record) => {
+    const attendanceDate = resolveAttendanceDate(record);
+    if (!attendanceDate) {
+      return;
+    }
+
+    const occurrenceKey = buildOccurrenceKey(record.sessionId, attendanceDate);
+    const session = sessionsById.get(record.sessionId);
+
+    if (!occurrenceMap.has(occurrenceKey)) {
+      occurrenceMap.set(occurrenceKey, {
+        occurrenceKey,
+        sessionId: record.sessionId,
+        sessionName: session?.title || record.sessionName || record.sessionId,
+        batch: session ? formatSessionBatch(session) : (normalizeText(record.batch) || 'Unassigned'),
+        course: session && Array.isArray(session.courses) && session.courses.length > 0
+          ? session.courses.join(', ')
+          : (normalizeText(record.course) || ''),
+        mentorName: session?.mentorName || record.mentorName || '',
+        className: session?.className || record.className || '',
+        attendanceDate,
+        uniqueStudents: new Set(),
+        sortDate: new Date(`${attendanceDate}T00:00:00.000Z`),
+        createdAt: session?.createdAt || record.createdAt || record.attendedAt || null
+      });
+    }
+
+    occurrenceMap.get(occurrenceKey).uniqueStudents.add(record.lmsId);
+  });
+
+  const search = normalizeText(query.search).toLowerCase();
+  const occurrenceSummaries = Array.from(occurrenceMap.values())
+    .filter((occurrence) => {
+      if (!search) {
+        return true;
+      }
+
+      const haystack = [
+        occurrence.sessionId,
+        occurrence.sessionName,
+        occurrence.batch,
+        occurrence.course,
+        occurrence.className,
+        occurrence.mentorName,
+        occurrence.attendanceDate
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(search);
+    });
+
+  const sessionTimeline = occurrenceSummaries
+    .slice()
+    .sort((left, right) => {
+      const leftTime = left.sortDate instanceof Date && !Number.isNaN(left.sortDate.getTime()) ? left.sortDate.getTime() : 0;
+      const rightTime = right.sortDate instanceof Date && !Number.isNaN(right.sortDate.getTime()) ? right.sortDate.getTime() : 0;
+      if (leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+      return left.sessionId.localeCompare(right.sessionId);
+    })
+    .map((occurrence) => occurrence.occurrenceKey);
+
+  const relevantOccurrenceKeys = new Set(occurrenceSummaries.map((occurrence) => occurrence.occurrenceKey));
+  const filteredAttendanceRecords = relevantAttendanceRecords.filter((record) => {
+    const attendanceDate = resolveAttendanceDate(record);
+    return attendanceDate && relevantOccurrenceKeys.has(buildOccurrenceKey(record.sessionId, attendanceDate));
+  });
+
+  const sessionsConducted = occurrenceSummaries.length;
   const presentStudentIdsToday = new Set(
-    relevantAttendanceRecords
+    filteredAttendanceRecords
       .filter((record) => formatDateValue(record.attendedAt) === formatDateValue(new Date()))
       .map((record) => record.lmsId)
   );
 
   const attendanceByStudent = new Map();
-  relevantAttendanceRecords.forEach((record) => {
+  filteredAttendanceRecords.forEach((record) => {
     if (!attendanceByStudent.has(record.lmsId)) {
       attendanceByStudent.set(record.lmsId, []);
     }
@@ -284,7 +328,7 @@ async function buildAttendanceSnapshot(query = {}) {
   const courseGroups = new Map();
   students.forEach((student) => {
     const studentRecords = attendanceByStudent.get(student.lmsId) || [];
-    const presentSessions = new Set(studentRecords.map((record) => record.sessionId)).size;
+    const presentSessions = new Set(studentRecords.map((record) => buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record)))).size;
     const courseKey = normalizeText(student.course) || 'Unassigned';
 
     if (!courseGroups.has(courseKey)) courseGroups.set(courseKey, { totalStudents: 0, presentSessions: 0 });
@@ -297,7 +341,7 @@ async function buildAttendanceSnapshot(query = {}) {
   const atRiskStudents = students
     .map((student) => {
       const studentRecords = attendanceByStudent.get(student.lmsId) || [];
-      const attendedSessionSet = new Set(studentRecords.map((record) => record.sessionId));
+      const attendedSessionSet = new Set(studentRecords.map((record) => buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record))));
       const presentSessions = attendedSessionSet.size;
       const attendancePercentage = getAttendanceRate(presentSessions, sessionsConducted);
       const missedSessions = Math.max(sessionsConducted - presentSessions, 0);
@@ -334,7 +378,7 @@ async function buildAttendanceSnapshot(query = {}) {
 
   const studentSummaries = students.map((student) => {
     const studentRecords = attendanceByStudent.get(student.lmsId) || [];
-    const attendedSessionSet = new Set(studentRecords.map((record) => record.sessionId));
+    const attendedSessionSet = new Set(studentRecords.map((record) => buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record))));
     const presentSessions = attendedSessionSet.size;
     const attendancePercentage = getAttendanceRate(presentSessions, sessionsConducted);
     const lastAttendanceRecord = studentRecords[studentRecords.length - 1] || null;
@@ -352,24 +396,32 @@ async function buildAttendanceSnapshot(query = {}) {
     };
   });
 
-  const sessionSummaries = filteredSessions.map((session) => {
-    const recordsForSession = relevantAttendanceRecords.filter((record) => record.sessionId === session.sessionId);
-    const uniqueStudents = new Set(recordsForSession.map((record) => record.lmsId)).size;
-    const attendanceDate = recordsForSession[0]?.attendanceDate || formatDateValue(session.createdAt);
-
-    return {
-      sessionId: session.sessionId,
-      sessionName: session.title,
-      batch: formatSessionBatch(session),
-      course: Array.isArray(session.courses) ? session.courses.join(', ') : '',
-      mentorName: session.mentorName || '',
-      className: session.className || '',
-      presentCount: uniqueStudents,
-      uniqueStudents,
-      attendancePercentage: getAttendanceRate(uniqueStudents, Math.max(students.length, 1)),
-      attendanceDate: attendanceDate || ''
-    };
-  });
+  const sessionSummaries = occurrenceSummaries
+    .slice()
+    .sort((left, right) => {
+      const leftTime = left.sortDate instanceof Date && !Number.isNaN(left.sortDate.getTime()) ? left.sortDate.getTime() : 0;
+      const rightTime = right.sortDate instanceof Date && !Number.isNaN(right.sortDate.getTime()) ? right.sortDate.getTime() : 0;
+      if (leftTime !== rightTime) {
+        return rightTime - leftTime;
+      }
+      return left.sessionId.localeCompare(right.sessionId);
+    })
+    .map((occurrence) => {
+      const uniqueStudents = occurrence.uniqueStudents.size;
+      return {
+        occurrenceKey: occurrence.occurrenceKey,
+        sessionId: occurrence.sessionId,
+        sessionName: occurrence.sessionName,
+        batch: occurrence.batch,
+        course: occurrence.course,
+        mentorName: occurrence.mentorName,
+        className: occurrence.className,
+        presentCount: uniqueStudents,
+        uniqueStudents,
+        attendancePercentage: getAttendanceRate(uniqueStudents, Math.max(students.length, 1)),
+        attendanceDate: occurrence.attendanceDate || ''
+      };
+    });
 
   const courseSummaries = Array.from(courseGroups.entries()).map(([course, value]) => ({
     course,
@@ -379,8 +431,8 @@ async function buildAttendanceSnapshot(query = {}) {
   }));
 
   const trendMap = new Map();
-  relevantAttendanceRecords.forEach((record) => {
-    const dateKey = record.attendanceDate || formatDateValue(record.attendedAt);
+  filteredAttendanceRecords.forEach((record) => {
+    const dateKey = resolveAttendanceDate(record);
     if (!dateKey) return;
     if (!trendMap.has(dateKey)) {
       trendMap.set(dateKey, { date: dateKey, present: 0, students: new Set(), sessions: new Set() });
@@ -388,11 +440,11 @@ async function buildAttendanceSnapshot(query = {}) {
     const entry = trendMap.get(dateKey);
     entry.present += 1;
     entry.students.add(record.lmsId);
-    entry.sessions.add(record.sessionId);
+    entry.sessions.add(buildOccurrenceKey(record.sessionId, dateKey));
   });
 
   const monthlyMap = new Map();
-  relevantAttendanceRecords.forEach((record) => {
+  filteredAttendanceRecords.forEach((record) => {
     const attendedAt = record.attendedAt ? new Date(record.attendedAt) : null;
     if (!attendedAt || Number.isNaN(attendedAt.getTime())) return;
     const monthKey = `${attendedAt.getFullYear()}-${String(attendedAt.getMonth() + 1).padStart(2, '0')}`;
@@ -402,10 +454,10 @@ async function buildAttendanceSnapshot(query = {}) {
     const entry = monthlyMap.get(monthKey);
     entry.present += 1;
     entry.students.add(record.lmsId);
-    entry.sessions.add(record.sessionId);
+    entry.sessions.add(buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record)));
   });
 
-  const totalPresentEntries = relevantAttendanceRecords.length;
+  const totalPresentEntries = filteredAttendanceRecords.length;
   const totalPossibleEntries = students.length * Math.max(sessionsConducted, 1);
   const overallAttendancePercentage = totalPossibleEntries > 0 ? Math.round((totalPresentEntries / totalPossibleEntries) * 1000) / 10 : 0;
 
@@ -415,6 +467,7 @@ async function buildAttendanceSnapshot(query = {}) {
       batch: normalizeText(query.batch),
       course: normalizeText(query.course),
       sessionId: normalizeText(query.sessionId),
+      attendanceDate: normalizeText(query.attendanceDate),
       search: normalizeText(query.search)
     },
     metrics: {
@@ -453,7 +506,7 @@ async function buildAttendanceSnapshot(query = {}) {
       .sort((left, right) => left.month.localeCompare(right.month)),
     atRiskStudents,
     students,
-    attendanceRecords: relevantAttendanceRecords,
+    attendanceRecords: filteredAttendanceRecords,
     sessions: filteredSessions,
     totalStudentsFiltered: students.length,
     totalAttendanceEntries: totalPresentEntries
@@ -576,6 +629,7 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     }
 
     const sessionId = normalizeText(req.params.sessionId);
+    const attendanceDate = normalizeText(req.query.attendanceDate);
     if (!sessionId) {
       return res.status(400).json({ success: false, message: 'Session ID is required' });
     }
@@ -602,11 +656,12 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
       session: {
         sessionId,
         sessionName: session?.title || allRecords[0]?.sessionName || sessionId,
+        occurrenceKey: buildOccurrenceKey(sessionId, attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || ''),
         batch: formatSessionBatch(session) || allRecords[0]?.batch || '',
         course: Array.isArray(session?.courses) ? session.courses.join(', ') : (allRecords[0]?.course || ''),
         mentorName: session?.mentorName || allRecords[0]?.mentorName || '',
         className: session?.className || allRecords[0]?.className || '',
-        attendanceDate: allRecords[0]?.attendanceDate || null
+        attendanceDate: attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || null
       },
       pagination: {
         page: safePage,
@@ -628,6 +683,42 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Error loading session attendance:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/session/:sessionId/occurrence', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const sessionId = normalizeText(req.params.sessionId);
+    const attendanceDate = normalizeText(req.query.attendanceDate);
+
+    if (!sessionId || !attendanceDate) {
+      return res.status(400).json({ success: false, message: 'Session ID and attendance date are required' });
+    }
+
+    const session = await ClassSession.findOne({ sessionId }).select('sessionId title').lean();
+    const result = await AttendanceRecord.deleteMany({ sessionId, attendanceDate });
+
+    await logSessionActivity({
+      sessionId,
+      sessionName: session?.title || sessionId,
+      userName: req.admin.username,
+      actionPerformed: 'Cleared Attendance',
+      status: 'success',
+      remarks: `Deleted ${result.deletedCount || 0} attendance record(s) for ${attendanceDate}`
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Cleared ${result.deletedCount || 0} attendance record(s) for ${attendanceDate}`,
+      deletedCount: result.deletedCount || 0
+    });
+  } catch (error) {
+    console.error('Error clearing attendance occurrence:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });

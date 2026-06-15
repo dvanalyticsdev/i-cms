@@ -24,10 +24,13 @@ let sessionHeartbeatInterval = null; // Polling timer to detect remote session r
 /**
  * Initialize the application on page load
  */
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initializeTheme();
   generateDeviceToken();
-  checkExistingSession();
+  const handledMeetingReturn = await handlePostMeetingReturn();
+  if (!handledMeetingReturn) {
+    checkExistingSession();
+  }
   setupEventListeners();
   console.log('DV Classroom Landing Page initialized');
 });
@@ -155,6 +158,58 @@ function setupEventListeners() {
   document.querySelectorAll('[data-theme-toggle]').forEach(button => {
     button.addEventListener('click', toggleTheme);
   });
+}
+
+async function handlePostMeetingReturn() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('zoomLeft') !== '1') {
+    return false;
+  }
+
+  const savedSession = localStorage.getItem('dvClassroom_session');
+  if (!savedSession) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+    return false;
+  }
+
+  try {
+    currentSession = JSON.parse(savedSession);
+  } catch {
+    localStorage.removeItem('dvClassroom_session');
+    window.history.replaceState({}, document.title, window.location.pathname);
+    return false;
+  }
+
+  try {
+    await logoutSession();
+    window.history.replaceState({}, document.title, window.location.pathname);
+  } catch (error) {
+    console.warn('Post-meeting logout fallback failed:', error.message);
+    window.location.href = '/';
+  }
+
+  return true;
+}
+
+async function startSessionAttendanceTracking() {
+  if (!currentSession?.lmsId || !selectedSession?.sessionId) {
+    return;
+  }
+
+  try {
+    await fetch(`${API_BASE_URL}/attendance/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        lmsId: currentSession.lmsId,
+        sessionId: selectedSession.sessionId
+      })
+    });
+  } catch (error) {
+    console.warn('Failed to start attendance tracking:', error.message);
+  }
 }
 
 function initializeTheme() {
@@ -1016,9 +1071,12 @@ function initZoomMeeting(zoomData) {
     // Load language support
     ZoomMtg.i18n.load('en-US');
     ZoomMtg.i18n.onLoad(function () {
+      const leaveUrl = new URL(window.location.href);
+      leaveUrl.searchParams.set('zoomLeft', '1');
+
       // Initialize SDK - appKey is already in JWT, don't pass it here
       ZoomMtg.init({
-        leaveUrl: window.location.href,
+        leaveUrl: leaveUrl.toString(),
         disableCORP: !window.crossOriginIsolated,
         // Improves camera/mic compatibility across browsers (recommended by Zoom samples)
         patchJsMedia: true,
@@ -1050,7 +1108,8 @@ function initZoomMeeting(zoomData) {
           // Join meeting
           ZoomMtg.join({
             ...meetingConfig,
-            success: function (res) {
+            success: async function (res) {
+              await startSessionAttendanceTracking();
               console.log('✓ Successfully joined Zoom meeting:', res);
               showSuccessToast('Joined Zoom meeting successfully!');
             },
@@ -1087,6 +1146,7 @@ function showMockZoomInterface(sessionData) {
   const zoomContainer = document.getElementById('zoomContainer');
 
   hideLandingUI();
+  startSessionAttendanceTracking();
   
   // Create mock Zoom interface
   const mockHTML = `

@@ -444,6 +444,12 @@ body {
     min-width: min(320px, 100%);
 }
 
+.attendance-detail-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
 .risk-reason-list {
     display: flex;
     flex-wrap: wrap;

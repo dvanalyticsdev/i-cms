@@ -197,25 +197,6 @@ router.post('/join-session', async (req, res) => {
           })()
         );
 
-        if (student) {
-          const joinedAt = new Date();
-          const attendanceDate = joinedAt.toLocaleDateString('en-CA');
-          await recordSessionJoin({
-            lmsId,
-            studentName: student.name || lmsId,
-            mobile: student.mobile || '',
-            course: student.course || '',
-            batch: student.batch || '',
-            sessionId: session.sessionId,
-            sessionName: session.title,
-            mentorName: session.mentorName || '',
-            className: session.className || '',
-            attendanceDate,
-            source: 'session-join',
-            joinedAt
-          });
-        }
-
       }
     } catch (err) {
       console.warn('Error while recording class join:', err.message);
@@ -237,6 +218,78 @@ router.post('/join-session', async (req, res) => {
 
   } catch (error) {
     console.error('Error in join-session:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+router.post('/attendance/start', async (req, res) => {
+  try {
+    const { sessionId, lmsId } = req.body || {};
+
+    if (!sessionId || !lmsId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID and LMS ID are required'
+      });
+    }
+
+    const [session, student, activeSession] = await Promise.all([
+      ClassSession.findOne({ sessionId }).lean(),
+      Student.findOne({ lmsId }).lean(),
+      ActiveSession.findOne({ lmsId, status: 'active' })
+    ]);
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found'
+      });
+    }
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    const joinedAt = new Date();
+    const attendanceDate = joinedAt.toLocaleDateString('en-CA');
+
+    if (activeSession) {
+      activeSession.classSessionId = session.sessionId;
+      activeSession.meetingNumber = session.meetingNumber || activeSession.meetingNumber;
+      activeSession.joinedAt = joinedAt;
+      activeSession.lastSeenAt = joinedAt;
+      activeSession.endedAt = null;
+      await activeSession.save();
+    }
+
+    const record = await recordSessionJoin({
+      lmsId,
+      studentName: student.name || lmsId,
+      mobile: student.mobile || '',
+      course: student.course || '',
+      batch: student.batch || '',
+      sessionId: session.sessionId,
+      sessionName: session.title,
+      mentorName: session.mentorName || '',
+      className: session.className || '',
+      attendanceDate,
+      source: 'zoom-join-success',
+      joinedAt
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Attendance started successfully',
+      attendance: record
+    });
+  } catch (error) {
+    console.error('Error starting attendance:', error.message);
     return res.status(500).json({
       success: false,
       message: 'Server error'

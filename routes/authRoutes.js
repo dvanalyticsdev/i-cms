@@ -284,6 +284,14 @@ router.get('/session/:lmsId', async (req, res) => {
 
     const studentRecord = await Student.findOne({ lmsId: lmsId.trim() }).lean();
     if (studentRecord && resolvePaymentStatus(studentRecord, lmsId.trim()) === 'DEFAULT') {
+      if (sessionData.classSessionId) {
+        try {
+          await finalizeAttendanceForActiveSession(sessionData, now);
+        } catch (err) {
+          console.warn('Failed to finalize attendance during fee-pending enforcement:', err.message);
+        }
+      }
+
       await ActiveSession.updateOne(
         { _id: sessionData._id },
         { $set: { status: 'ended', endedAt: now, lastSeenAt: now } }
