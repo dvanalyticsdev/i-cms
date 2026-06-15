@@ -333,6 +333,39 @@ body {
     align-items: stretch;
 }
 
+.attendance-risk-table-container {
+    overflow-x: auto;
+}
+
+.attendance-session-row {
+    cursor: pointer;
+}
+
+.attendance-session-row:focus-within,
+.attendance-session-row:hover {
+    background: var(--neutral-bg);
+}
+
+.attendance-session-cell {
+    min-width: 260px;
+}
+
+.attendance-session-title {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.attendance-session-meta {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.attendance-session-actions {
+    white-space: nowrap;
+}
+
 .attendance-roster-panel {
     margin-top: 18px;
 }

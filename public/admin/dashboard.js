@@ -3079,26 +3079,27 @@ function renderAttendanceRiskTable() {
     if (records.length === 0) {
         riskList.innerHTML = `
             <tr>
-                <td colspan="8" style="text-align: center; padding: 40px; color: #999;">No sessions found for the selected filters.</td>
+                <td colspan="5" style="text-align: center; padding: 40px; color: #999;">No sessions found for the selected filters.</td>
             </tr>
         `;
         return;
     }
 
     riskList.innerHTML = records.map(session => `
-        <tr>
-            <td>
-                <div style="font-weight: 600;">${escapeHtml(session.sessionName || session.sessionId)}</div>
-                <div style="color: #999; font-size: 12px;">${escapeHtml(session.sessionId)}</div>
+        <tr class="attendance-session-row" onclick="viewAttendance('${escapeHtml(session.sessionId)}')" role="button" tabindex="0" onkeydown="if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); viewAttendance('${escapeHtml(session.sessionId)}'); }">
+            <td class="attendance-session-cell">
+                <div class="attendance-session-title">${escapeHtml(session.sessionName || session.sessionId)}</div>
+                <div class="attendance-session-meta">${escapeHtml(session.sessionId)}</div>
+                <div class="attendance-session-meta">${escapeHtml(session.className || '-')} • ${escapeHtml(session.mentorName || '-')}</div>
             </td>
-            <td class="session-access-cell">${renderSummaryLine('Batches', getSessionBatches(session), 4)}</td>
-            <td>${escapeHtml(session.course || '-')}</td>
-            <td>${escapeHtml(session.className || '-')}</td>
-            <td>${escapeHtml(session.mentorName || '-')}</td>
+            <td class="session-access-cell">
+                ${renderSummaryLine('Batches', getSessionBatches(session), 3)}
+                ${renderSummaryLine('Courses', String(session.course || '').split(',').map(item => item.trim()).filter(Boolean), 2, '-')}
+            </td>
             <td>${session.attendanceDate ? escapeHtml(session.attendanceDate) : '-'}</td>
             <td><strong>${escapeHtml(String(session.uniqueStudents ?? session.presentCount ?? 0))}</strong></td>
-            <td>
-                <button class="btn btn-secondary" onclick="viewAttendance('${escapeHtml(session.sessionId)}')">View Attendance</button>
+            <td class="attendance-session-actions">
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); viewAttendance('${escapeHtml(session.sessionId)}')">View Attendance</button>
             </td>
         </tr>
     `).join('');
