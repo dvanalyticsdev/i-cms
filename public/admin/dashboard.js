@@ -108,6 +108,77 @@ function formatSessionBatches(session) {
     return batches.length > 0 ? batches.join(', ') : '-';
 }
 
+function isAllowedPosterFile(file) {
+    if (!file) {
+        return false;
+    }
+
+    const fileName = String(file.name || '').toLowerCase();
+    return ['image/png', 'image/jpeg', 'image/jpg'].includes(file.type) || /\.(png|jpe?g)$/i.test(fileName);
+}
+
+function setPosterPreview(dataUrl) {
+    const preview = document.getElementById('sessionPosterPreview');
+    const image = document.getElementById('sessionPosterPreviewImage');
+    const hiddenInput = document.getElementById('sessionPosterDataUrl');
+
+    if (!preview || !image || !hiddenInput) {
+        return;
+    }
+
+    hiddenInput.value = dataUrl || '';
+
+    if (!dataUrl) {
+        preview.classList.add('hidden');
+        image.removeAttribute('src');
+        return;
+    }
+
+    image.src = dataUrl;
+    preview.classList.remove('hidden');
+}
+
+function clearSessionPosterSelection() {
+    const fileInput = document.getElementById('sessionPosterFile');
+    if (fileInput) {
+        fileInput.value = '';
+    }
+
+    setPosterPreview('');
+}
+
+function handleSessionPosterChange(event) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+        clearSessionPosterSelection();
+        return;
+    }
+
+    if (!isAllowedPosterFile(file)) {
+        showToast('Poster must be in PNG, JPEG, or JPG format', 'error');
+        clearSessionPosterSelection();
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        if (!result.startsWith('data:image/')) {
+            showToast('Failed to read poster image', 'error');
+            clearSessionPosterSelection();
+            return;
+        }
+
+        setPosterPreview(result);
+    };
+    reader.onerror = () => {
+        showToast('Failed to read poster image', 'error');
+        clearSessionPosterSelection();
+    };
+    reader.readAsDataURL(file);
+}
+
 // ====================================
 // INITIALIZATION
 // ====================================
@@ -474,6 +545,11 @@ function setupEventListeners() {
         appBackdrop.addEventListener('click', () => {
             setSidebarOpen(false);
         });
+    }
+
+    const posterInput = document.getElementById('sessionPosterFile');
+    if (posterInput) {
+        posterInput.addEventListener('change', handleSessionPosterChange);
     }
 
     setupClassAccessScrolling();
@@ -885,6 +961,7 @@ function openCreateSessionModal() {
     document.getElementById('meetingNumber').value = '';
     document.getElementById('passcode').value = '';
     document.getElementById('description').value = '';
+    clearSessionPosterSelection();
     document.getElementById('mentorName').value = '';
     document.getElementById('sessionBatchSearch').value = '';
     renderSessionBatchOptions([]);
@@ -914,6 +991,8 @@ async function openEditSessionModal(sessionId) {
     document.getElementById('meetingNumber').value = session.meetingNumber;
     document.getElementById('passcode').value = session.passcode;
     document.getElementById('description').value = session.description || '';
+    document.getElementById('sessionPosterFile').value = '';
+    setPosterPreview(session.posterImage || '');
     document.getElementById('mentorName').value = session.mentorName || '';
     sessionBatchSelection = new Set(getSessionBatches(session));
     document.getElementById('sessionBatchSearch').value = '';
@@ -947,6 +1026,7 @@ async function handleSaveSession(event) {
     const meetingNumber = meetingNumberRaw.replace(/\s+/g, '');
     const passcode = document.getElementById('passcode').value.trim();
     const description = document.getElementById('description').value.trim();
+    const posterImage = document.getElementById('sessionPosterDataUrl').value.trim();
     const mentorName = document.getElementById('mentorName').value.trim();
     const className = document.getElementById('sessionClassName').value.trim();
     const batches = getSelectedSessionBatches();
@@ -983,6 +1063,7 @@ async function handleSaveSession(event) {
                 meetingNumber,
                 passcode,
                 description,
+                posterImage,
                 mentorName,
                 className,
                 batch: batches[0] || '',

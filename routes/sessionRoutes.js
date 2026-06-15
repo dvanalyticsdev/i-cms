@@ -57,7 +57,7 @@ router.get('/class-sessions', async (req, res) => {
     
     if (studentCourse) {
       const allSessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch batches mentorName className')
+        .select('sessionId title meetingNumber status description posterImage createdAt updatedAt courses passcode batch batches mentorName className')
         .sort({ updatedAt: -1 })
         .lean();
       
@@ -90,7 +90,7 @@ router.get('/class-sessions', async (req, res) => {
       });
     } else {
       const sessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description createdAt updatedAt courses passcode batch batches mentorName className')
+        .select('sessionId title meetingNumber status description posterImage createdAt updatedAt courses passcode batch batches mentorName className')
         .sort({ updatedAt: -1 })
         .lean();
 

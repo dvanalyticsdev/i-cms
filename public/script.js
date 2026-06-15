@@ -501,6 +501,10 @@ function renderSessionCards() {
   
   container.innerHTML = availableSessions.map(session => `
     <div class="session-card ${session.status === 'off' ? 'inactive' : 'active'}">
+      ${session.posterImage ? `
+      <div class="session-poster-wrap">
+        <img class="session-poster" src="${session.posterImage}" alt="${escapeHtml(session.title)} poster">
+      </div>` : ''}
       <div class="session-card-header">
         <h3 class="session-title">${escapeHtml(session.title)}</h3>
         <span class="session-status ${session.status}">

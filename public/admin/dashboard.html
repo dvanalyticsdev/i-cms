@@ -829,6 +829,24 @@
                     </div>
 
                     <div class="form-group">
+                        <label class="form-label">Session Poster</label>
+                        <input
+                            type="file"
+                            id="sessionPosterFile"
+                            class="form-input"
+                            accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+                        >
+                        <input type="hidden" id="sessionPosterDataUrl" value="">
+                        <small class="form-hint">Optional. Allowed formats: PNG, JPEG, JPG.</small>
+                        <div id="sessionPosterPreview" class="poster-preview hidden">
+                            <img id="sessionPosterPreviewImage" class="poster-preview-image" alt="Session poster preview">
+                            <div class="poster-preview-actions">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="clearSessionPosterSelection()">Remove Poster</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
                         <label class="form-label">Mentor Name *</label>
                         <input
                             type="text"

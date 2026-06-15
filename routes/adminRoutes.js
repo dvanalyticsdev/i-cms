@@ -55,6 +55,37 @@ function parseBatchNames(batches) {
   );
 }
 
+function normalizePosterImage(posterImage) {
+  if (posterImage === undefined) {
+    return undefined;
+  }
+
+  const normalized = normalizeText(posterImage);
+  if (!normalized) {
+    return '';
+  }
+
+  const matches = normalized.match(/^data:image\/(png|jpeg|jpg);base64,([A-Za-z0-9+/=]+)$/i);
+  if (!matches) {
+    const error = new Error('Poster must be a PNG, JPEG, or JPG image');
+    error.status = 400;
+    throw error;
+  }
+
+  const mimeType = matches[1].toLowerCase();
+  const sanitizedMimeType = mimeType === 'jpg' ? 'jpeg' : mimeType;
+  const base64Payload = matches[2];
+  const estimatedBytes = Math.floor((base64Payload.length * 3) / 4);
+
+  if (estimatedBytes > 5 * 1024 * 1024) {
+    const error = new Error('Poster image must be 5MB or smaller');
+    error.status = 400;
+    throw error;
+  }
+
+  return `data:image/${sanitizedMimeType};base64,${base64Payload}`;
+}
+
 function escapeCsvValue(value) {
   const text = value === undefined || value === null ? '' : String(value);
   return `"${text.replace(/"/g, '""')}"`;
@@ -375,10 +406,11 @@ router.post('/session', authMiddleware, async (req, res) => {
       return;
     }
 
-    const { title, meetingNumber, passcode, description, courses, batch, batches, mentorName, className } = req.body;
+    const { title, meetingNumber, passcode, description, courses, batch, batches, mentorName, className, posterImage } = req.body;
     const normalizedBatches = parseBatchNames(batches !== undefined ? batches : batch);
     const normalizedMentorName = normalizeText(mentorName);
     const normalizedClassName = normalizeText(className);
+    const normalizedPosterImage = normalizePosterImage(posterImage);
 
     if (!title || !meetingNumber || !passcode || normalizedBatches.length === 0 || !normalizedMentorName || !normalizedClassName) {
       return res.status(400).json({ success: false, message: 'Title, Meeting Number, Passcode, at least one Batch, Mentor Name, and Class Name are required' });
@@ -400,6 +432,7 @@ router.post('/session', authMiddleware, async (req, res) => {
       meetingNumber: sanitizedMeetingNumber,
       passcode: passcode.toString().trim(),
       description: (description || '').trim(),
+      posterImage: normalizedPosterImage || '',
       mentorName: normalizedMentorName,
       className: normalizedClassName,
       batch: normalizedBatches[0],
@@ -470,8 +503,8 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
       return;
     }
 
-    const { title, meetingNumber, passcode, description, courses, batch, batches, mentorName, className } = req.body;
-    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined && batches === undefined && mentorName === undefined && className === undefined) {
+    const { title, meetingNumber, passcode, description, courses, batch, batches, mentorName, className, posterImage } = req.body;
+    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined && batches === undefined && mentorName === undefined && className === undefined && posterImage === undefined) {
       return res.status(400).json({ success: false, message: 'At least one field must be provided for update' });
     }
 
@@ -489,6 +522,9 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
     }
     if (passcode) updateData.passcode = passcode.toString().trim();
     if (description !== undefined) updateData.description = (description || '').trim();
+    if (posterImage !== undefined) {
+      updateData.posterImage = normalizePosterImage(posterImage);
+    }
     if (mentorName !== undefined) {
       const normalizedMentorName = normalizeText(mentorName);
       if (!normalizedMentorName) {

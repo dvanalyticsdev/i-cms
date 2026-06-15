@@ -1044,6 +1044,19 @@ a:hover {
   background: linear-gradient(135deg, rgba(244, 67, 54, 0.02) 0%, rgba(244, 67, 54, 0.04) 100%);
 }
 
+.session-poster-wrap {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
+}
+
+.session-poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .session-card-header {
   padding: var(--spacing-lg);
   border-bottom: 1px solid var(--light-gray);

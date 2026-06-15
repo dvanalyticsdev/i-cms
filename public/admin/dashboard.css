@@ -824,6 +824,45 @@ body {
     box-shadow: 0 0 0 3px rgba(245, 101, 101, 0.1);
 }
 
+.form-hint {
+    display: block;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.poster-preview {
+    margin-top: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px;
+    background: #f8fafc;
+}
+
+.poster-preview.hidden {
+    display: none;
+}
+
+.poster-preview-image {
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+    border-radius: 8px;
+    display: block;
+    background: #e2e8f0;
+}
+
+.poster-preview-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.btn-sm {
+    padding: 8px 12px;
+    font-size: 12px;
+}
+
 /* Modals */
 .modal {
     position: fixed;

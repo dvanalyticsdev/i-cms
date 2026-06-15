@@ -43,6 +43,10 @@ const classSessionSchema = new mongoose.Schema(
       trim: true,
       default: ''
     },
+    posterImage: {
+      type: String,
+      default: ''
+    },
     mentorName: {
       type: String,
       required: true,
