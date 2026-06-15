@@ -337,6 +337,56 @@ body {
     overflow-x: auto;
 }
 
+.attendance-detail-table-container {
+    overflow-x: auto;
+}
+
+.attendance-detail-table {
+    min-width: 840px;
+}
+
+.attendance-detail-table th,
+.attendance-detail-table td {
+    vertical-align: top;
+}
+
+.attendance-detail-table th:nth-child(1),
+.attendance-detail-table td:nth-child(1) {
+    min-width: 150px;
+}
+
+.attendance-detail-table th:nth-child(2),
+.attendance-detail-table td:nth-child(2) {
+    min-width: 170px;
+}
+
+.attendance-detail-table th:nth-child(3),
+.attendance-detail-table td:nth-child(3) {
+    min-width: 140px;
+}
+
+.attendance-detail-table th:nth-child(4),
+.attendance-detail-table td:nth-child(4) {
+    min-width: 120px;
+}
+
+.attendance-detail-table th:nth-child(5),
+.attendance-detail-table td:nth-child(5) {
+    min-width: 130px;
+}
+
+.attendance-detail-table th:nth-child(6),
+.attendance-detail-table td:nth-child(6) {
+    min-width: 90px;
+    white-space: nowrap;
+}
+
+.attendance-detail-table th:nth-child(7),
+.attendance-detail-table td:nth-child(7) {
+    min-width: 90px;
+    white-space: nowrap;
+}
+
 .attendance-session-row {
     cursor: pointer;
 }
