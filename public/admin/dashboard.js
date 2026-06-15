@@ -44,6 +44,7 @@ let attendanceInsightsState = {
     sessionAttendance: [],
     selectedSession: null,
     pagination: { page: 1, limit: 10, total: 0, totalPages: 1 },
+    detailPagination: { page: 1, limit: 30, total: 0, totalPages: 1 },
     roster: [],
     rosterPagination: { page: 1, limit: 20, total: 0, totalPages: 1 },
     filters: {}
@@ -100,7 +101,16 @@ function getSessionBatches(session) {
     }
 
     const batch = String(session?.batch || '').trim();
-    return batch ? [batch] : [];
+    if (!batch) {
+        return [];
+    }
+
+    return Array.from(new Set(
+        batch
+            .split(',')
+            .map(item => item.trim())
+            .filter(Boolean)
+    ));
 }
 
 function formatSessionBatches(session) {
@@ -135,6 +145,18 @@ function summarizeSessionAccessList(items, maxVisible = 4) {
         summary: `${visibleItems} +${normalizedItems.length - maxVisible} more`,
         fullText: normalizedItems.join(', ')
     };
+}
+
+function renderSummaryLine(label, items, maxVisible = 4, fallback = '-') {
+    const summary = summarizeSessionAccessList(items, maxVisible);
+    const text = summary.fullText === '-' ? fallback : summary.summary;
+    const title = summary.fullText === '-' ? fallback : summary.fullText;
+
+    return `
+        <span class="session-access-line" title="${escapeHtml(title)}">
+            <strong>${escapeHtml(label)}:</strong> ${escapeHtml(text)}
+        </span>
+    `;
 }
 
 function isAllowedPosterFile(file) {
@@ -2948,6 +2970,7 @@ async function loadAttendanceInsights(page = 1) {
                 sessionAttendance: attendanceInsightsState.sessionAttendance || [],
                 selectedSession: attendanceInsightsState.selectedSession || null,
                 pagination: { page, limit, total, totalPages },
+                detailPagination: attendanceInsightsState.detailPagination || { page: 1, limit: 30, total: 0, totalPages: 1 },
                 roster: attendanceInsightsState.roster || [],
                 rosterPagination: attendanceInsightsState.rosterPagination || { page: 1, limit: 20, total: 0, totalPages: 1 },
                 filters
@@ -2997,6 +3020,7 @@ async function loadAttendanceInsights(page = 1) {
             sessionAttendance: attendanceInsightsState.sessionAttendance || [],
             selectedSession: attendanceInsightsState.selectedSession || null,
             pagination: data.pagination || { page: 1, limit: 10, total: 0, totalPages: 1 },
+            detailPagination: attendanceInsightsState.detailPagination || { page: 1, limit: 30, total: 0, totalPages: 1 },
             roster: attendanceInsightsState.roster || [],
             rosterPagination: attendanceInsightsState.rosterPagination || { page: 1, limit: 20, total: 0, totalPages: 1 },
             filters: data.filters || {}
@@ -3067,7 +3091,7 @@ function renderAttendanceRiskTable() {
                 <div style="font-weight: 600;">${escapeHtml(session.sessionName || session.sessionId)}</div>
                 <div style="color: #999; font-size: 12px;">${escapeHtml(session.sessionId)}</div>
             </td>
-            <td>${escapeHtml(session.batch || '-')}</td>
+            <td class="session-access-cell">${renderSummaryLine('Batches', getSessionBatches(session), 4)}</td>
             <td>${escapeHtml(session.course || '-')}</td>
             <td>${escapeHtml(session.className || '-')}</td>
             <td>${escapeHtml(session.mentorName || '-')}</td>
@@ -3080,13 +3104,14 @@ function renderAttendanceRiskTable() {
     `).join('');
 }
 
-async function viewAttendance(sessionId, showLoadingState = true) {
+async function viewAttendance(sessionId, showLoadingState = true, page = 1) {
     if (!sessionId) {
         return;
     }
 
     const detailMeta = document.getElementById('attendanceDetailMeta');
     const detailList = document.getElementById('attendanceDetailList');
+    const detailPagination = document.getElementById('attendanceDetailPagination');
     const sessionFilter = document.getElementById('attendanceSessionFilter');
     const filters = collectAttendanceFilters();
 
@@ -3106,16 +3131,29 @@ async function viewAttendance(sessionId, showLoadingState = true) {
         `;
     }
 
+    if (showLoadingState && detailPagination) {
+        detailPagination.innerHTML = '';
+    }
+
     try {
         if (attendanceDemoMode) {
             const session = attendanceDemoData.sessionSummaries.find(item => item.sessionId === sessionId) || { sessionId, sessionName: sessionId };
+            const allRecords = attendanceDemoData.sessionAttendance[sessionId] || [];
+            const limit = 30;
+            const total = allRecords.length;
+            const totalPages = Math.max(Math.ceil(total / limit), 1);
+            const safePage = Math.min(Math.max(page, 1), totalPages);
+
             attendanceInsightsState.selectedSession = session;
-            attendanceInsightsState.sessionAttendance = attendanceDemoData.sessionAttendance[sessionId] || [];
+            attendanceInsightsState.sessionAttendance = allRecords.slice((safePage - 1) * limit, safePage * limit);
+            attendanceInsightsState.detailPagination = { page: safePage, limit, total, totalPages };
             renderAttendanceDetailTable();
             return;
         }
 
         const params = new URLSearchParams({
+            page: String(page),
+            limit: '30',
             timeframe: filters.timeframe,
             from: filters.from,
             to: filters.to,
@@ -3142,6 +3180,7 @@ async function viewAttendance(sessionId, showLoadingState = true) {
 
         attendanceInsightsState.selectedSession = data.session || { sessionId };
         attendanceInsightsState.sessionAttendance = data.records || [];
+        attendanceInsightsState.detailPagination = data.pagination || { page: 1, limit: 30, total: 0, totalPages: 1 };
         renderAttendanceDetailTable();
     } catch (error) {
         console.error('Error loading session attendance:', error);
@@ -3161,16 +3200,19 @@ async function viewAttendance(sessionId, showLoadingState = true) {
 function clearAttendanceDetailState() {
     attendanceInsightsState.selectedSession = null;
     attendanceInsightsState.sessionAttendance = [];
+    attendanceInsightsState.detailPagination = { page: 1, limit: 30, total: 0, totalPages: 1 };
     renderAttendanceDetailTable();
 }
 
 function renderAttendanceDetailTable() {
     const detailMeta = document.getElementById('attendanceDetailMeta');
     const detailList = document.getElementById('attendanceDetailList');
+    const detailPagination = document.getElementById('attendanceDetailPagination');
     if (!detailMeta || !detailList) return;
 
     const session = attendanceInsightsState.selectedSession;
     const records = attendanceInsightsState.sessionAttendance || [];
+    const pagination = attendanceInsightsState.detailPagination || { page: 1, limit: 30, total: records.length, totalPages: 1 };
 
     if (!session) {
         detailMeta.textContent = 'Choose a session to view attendance.';
@@ -3179,10 +3221,15 @@ function renderAttendanceDetailTable() {
                 <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
             </tr>
         `;
+        if (detailPagination) {
+            detailPagination.innerHTML = '';
+        }
         return;
     }
 
-    detailMeta.textContent = `${session.sessionName || session.sessionId} • ${records.length} student(s) joined`;
+    const start = pagination.total === 0 ? 0 : ((pagination.page - 1) * pagination.limit) + 1;
+    const end = pagination.total === 0 ? 0 : Math.min(start + records.length - 1, pagination.total);
+    detailMeta.textContent = `${session.sessionName || session.sessionId} • ${pagination.total || 0} student(s) joined${pagination.total > pagination.limit ? ` • Showing ${start}-${end}` : ''}`;
 
     if (records.length === 0) {
         detailList.innerHTML = `
@@ -3190,6 +3237,9 @@ function renderAttendanceDetailTable() {
                 <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No attendance records found for this session.</td>
             </tr>
         `;
+        if (detailPagination) {
+            detailPagination.innerHTML = '';
+        }
         return;
     }
 
@@ -3204,6 +3254,38 @@ function renderAttendanceDetailTable() {
             <td><span class="risk-pill" style="background: rgba(72, 187, 120, 0.12); color: #276749;">${escapeHtml(record.status || 'present')}</span></td>
         </tr>
     `).join('');
+
+    renderAttendanceDetailPagination();
+}
+
+function renderAttendanceDetailPagination() {
+    const container = document.getElementById('attendanceDetailPagination');
+    const sessionId = attendanceInsightsState.selectedSession?.sessionId;
+    const pagination = attendanceInsightsState.detailPagination || { page: 1, totalPages: 1 };
+
+    if (!container || !sessionId) return;
+
+    const totalPages = Math.max(pagination.totalPages || 1, 1);
+    const currentPage = Math.max(pagination.page || 1, 1);
+
+    if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const buttons = [];
+    buttons.push(`<button class="pagination-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="viewAttendance('${escapeHtml(sessionId)}', false, ${currentPage - 1})">Prev</button>`);
+
+    for (let page = 1; page <= totalPages; page++) {
+        if (page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1) {
+            buttons.push(`<button class="pagination-btn ${page === currentPage ? 'active' : ''}" onclick="viewAttendance('${escapeHtml(sessionId)}', false, ${page})">${page}</button>`);
+        } else if (page === currentPage - 2 || page === currentPage + 2) {
+            buttons.push('<span style="padding: 8px 4px; color: #999;">...</span>');
+        }
+    }
+
+    buttons.push(`<button class="pagination-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="viewAttendance('${escapeHtml(sessionId)}', false, ${currentPage + 1})">Next</button>`);
+    container.innerHTML = buttons.join('');
 }
 
 async function loadAttendanceRoster(page = 1) {

@@ -558,25 +558,38 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     }
 
     const window = resolveWindow(req.query);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
     const attendanceMatch = buildAttendanceMatch({ ...req.query, sessionId }, window);
-    const records = await AttendanceRecord.find(attendanceMatch)
+    const allRecords = await AttendanceRecord.find(attendanceMatch)
       .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status')
       .sort({ attendedAt: 1 })
       .lean();
 
-    const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch className courses mentorName').lean();
+    const total = allRecords.length;
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const safePage = Math.min(page, totalPages);
+    const records = allRecords.slice((safePage - 1) * limit, safePage * limit);
+
+    const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch batches className courses mentorName').lean();
 
     return res.status(200).json({
       success: true,
       message: 'Session attendance retrieved successfully',
       session: {
         sessionId,
-        sessionName: session?.title || records[0]?.sessionName || sessionId,
-        batch: session?.batch || records[0]?.batch || '',
-        course: Array.isArray(session?.courses) ? session.courses.join(', ') : (records[0]?.course || ''),
-        mentorName: session?.mentorName || records[0]?.mentorName || '',
-        className: session?.className || records[0]?.className || '',
-        attendanceDate: records[0]?.attendanceDate || null
+        sessionName: session?.title || allRecords[0]?.sessionName || sessionId,
+        batch: formatSessionBatch(session) || allRecords[0]?.batch || '',
+        course: Array.isArray(session?.courses) ? session.courses.join(', ') : (allRecords[0]?.course || ''),
+        mentorName: session?.mentorName || allRecords[0]?.mentorName || '',
+        className: session?.className || allRecords[0]?.className || '',
+        attendanceDate: allRecords[0]?.attendanceDate || null
+      },
+      pagination: {
+        page: safePage,
+        limit,
+        total,
+        totalPages
       },
       records: records.map((record) => ({
         lmsId: record.lmsId,
