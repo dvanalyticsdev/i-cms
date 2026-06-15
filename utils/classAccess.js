@@ -1,4 +1,5 @@
 const DEFAULT_PAYMENT_STATUS = 'DEFAULT';
+const FULLY_PAID_STATUS = 'FULLY PAID';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -15,6 +16,23 @@ function normalizePaymentStatus(value) {
 function normalizeAccessCell(value) {
   const normalized = normalizeText(value).toUpperCase();
   return normalized === 'YES' || normalized === 'Y' || normalized === 'TRUE' || normalized === '1';
+}
+
+function normalizeFeeStatusException(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const normalized = normalizeText(value).toUpperCase();
+  return normalized === 'YES' || normalized === 'Y' || normalized === 'TRUE' || normalized === '1';
+}
+
+function getEffectivePaymentStatus(student) {
+  if (normalizeFeeStatusException(student?.feeStatusException)) {
+    return FULLY_PAID_STATUS;
+  }
+
+  return normalizePaymentStatus(student?.paymentStatus);
 }
 
 function buildRuleKey(course, paymentStatus) {
@@ -35,7 +53,7 @@ function isClassAccessible({ student, className, ruleMap }) {
   }
 
   const course = normalizeText(student.course);
-  const paymentStatus = normalizePaymentStatus(student.paymentStatus);
+  const paymentStatus = getEffectivePaymentStatus(student);
   const directRule = ruleMap.get(buildRuleKey(course, paymentStatus));
   const fallbackRule = ruleMap.get(buildRuleKey(course, DEFAULT_PAYMENT_STATUS));
   const rule = directRule || fallbackRule;
@@ -50,9 +68,12 @@ function isClassAccessible({ student, className, ruleMap }) {
 
 module.exports = {
   DEFAULT_PAYMENT_STATUS,
+  FULLY_PAID_STATUS,
   normalizeText,
   normalizePaymentStatus,
   normalizeAccessCell,
+  normalizeFeeStatusException,
+  getEffectivePaymentStatus,
   buildRuleKey,
   mapRulesByKey,
   isClassAccessible

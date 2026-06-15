@@ -6,6 +6,8 @@ const ClassSession = require('../models/ClassSession');
 const AttendanceRecord = require('../models/AttendanceRecord');
 const { logSessionActivity } = require('../utils/sessionLogger');
 
+const PRESENT_ATTENDANCE_THRESHOLD = 0.8;
+
 function ensureAdminRole(req, res) {
   if (!req.admin || req.admin.role !== 'admin') {
     res.status(403).json({ success: false, message: 'Admin access required' });
@@ -134,6 +136,12 @@ function formatDateValue(value) {
   return date.toISOString().slice(0, 10);
 }
 
+function toValidDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function buildCsvValue(value) {
   const text = value === undefined || value === null ? '' : String(value);
   return '"' + text.replace(/"/g, '""') + '"';
@@ -185,6 +193,92 @@ function resolveDurationMinutes(record) {
   }
 
   return Math.round((Math.max(endedAt.getTime() - startedAt.getTime(), 0) / 60000) * 10) / 10;
+}
+
+function resolveRecordStartedAt(record) {
+  return [record.firstJoinedAt, record.attendedAt, record.createdAt]
+    .map(toValidDate)
+    .filter(Boolean)
+    .sort((left, right) => left.getTime() - right.getTime())[0] || null;
+}
+
+function resolveRecordEndedAt(record) {
+  const startedAt = resolveRecordStartedAt(record);
+  const endCandidates = [
+    record.leftAt,
+    record.lastSeenAt,
+    record.currentJoinStartedAt ? new Date() : null,
+    record.updatedAt
+  ]
+    .map(toValidDate)
+    .filter(Boolean);
+
+  if (!startedAt) {
+    return endCandidates.sort((left, right) => right.getTime() - left.getTime())[0] || null;
+  }
+
+  return endCandidates
+    .filter((value) => value.getTime() >= startedAt.getTime())
+    .sort((left, right) => right.getTime() - left.getTime())[0] || null;
+}
+
+function buildOccurrenceAnalytics(records = []) {
+  const recordsByOccurrence = new Map();
+
+  records.forEach((record) => {
+    const attendanceDate = resolveAttendanceDate(record);
+    if (!attendanceDate) {
+      return;
+    }
+
+    const occurrenceKey = buildOccurrenceKey(record.sessionId, attendanceDate);
+    if (!recordsByOccurrence.has(occurrenceKey)) {
+      recordsByOccurrence.set(occurrenceKey, []);
+    }
+    recordsByOccurrence.get(occurrenceKey).push(record);
+  });
+
+  const analyticsByOccurrence = new Map();
+  recordsByOccurrence.forEach((occurrenceRecords, occurrenceKey) => {
+    const startTimes = occurrenceRecords
+      .map(resolveRecordStartedAt)
+      .filter(Boolean)
+      .sort((left, right) => left.getTime() - right.getTime());
+    const endTimes = occurrenceRecords
+      .map(resolveRecordEndedAt)
+      .filter(Boolean)
+      .sort((left, right) => right.getTime() - left.getTime());
+    const occurrenceDurationMinutes = startTimes.length > 0 && endTimes.length > 0
+      ? Math.max((endTimes[0].getTime() - startTimes[0].getTime()) / 60000, 0)
+      : 0;
+    const thresholdMinutes = occurrenceDurationMinutes * PRESENT_ATTENDANCE_THRESHOLD;
+    const attendeeStats = new Map();
+
+    occurrenceRecords.forEach((record) => {
+      const durationMinutes = resolveDurationMinutes(record);
+      const isPresent = occurrenceDurationMinutes > 0
+        ? durationMinutes >= thresholdMinutes
+        : durationMinutes > 0;
+
+      attendeeStats.set(record.lmsId, {
+        durationMinutes,
+        status: isPresent ? 'present' : 'absent'
+      });
+    });
+
+    analyticsByOccurrence.set(occurrenceKey, {
+      occurrenceDurationMinutes: Math.round(occurrenceDurationMinutes * 10) / 10,
+      thresholdMinutes: Math.round(thresholdMinutes * 10) / 10,
+      attendeeStats,
+      presentStudentIds: new Set(
+        Array.from(attendeeStats.entries())
+          .filter(([, value]) => value.status === 'present')
+          .map(([lmsId]) => lmsId)
+      )
+    });
+  });
+
+  return analyticsByOccurrence;
 }
 
 async function buildAttendanceSnapshot(query = {}) {
@@ -309,16 +403,34 @@ async function buildAttendanceSnapshot(query = {}) {
     const attendanceDate = resolveAttendanceDate(record);
     return attendanceDate && relevantOccurrenceKeys.has(buildOccurrenceKey(record.sessionId, attendanceDate));
   });
+  const occurrenceAnalytics = buildOccurrenceAnalytics(filteredAttendanceRecords);
+  const enrichedAttendanceRecords = filteredAttendanceRecords.map((record) => {
+    const attendanceDate = resolveAttendanceDate(record);
+    const occurrenceKey = buildOccurrenceKey(record.sessionId, attendanceDate);
+    const analytics = occurrenceAnalytics.get(occurrenceKey);
+    const attendeeStats = analytics?.attendeeStats?.get(record.lmsId);
+
+    return {
+      ...record,
+      attendanceDate,
+      occurrenceKey,
+      durationMinutes: attendeeStats?.durationMinutes ?? resolveDurationMinutes(record),
+      status: attendeeStats?.status || record.status || 'absent',
+      occurrenceDurationMinutes: analytics?.occurrenceDurationMinutes ?? 0,
+      thresholdMinutes: analytics?.thresholdMinutes ?? 0
+    };
+  });
 
   const sessionsConducted = occurrenceSummaries.length;
   const presentStudentIdsToday = new Set(
-    filteredAttendanceRecords
-      .filter((record) => formatDateValue(record.attendedAt) === formatDateValue(new Date()))
+    enrichedAttendanceRecords
+      .filter((record) => record.status === 'present')
+      .filter((record) => record.attendanceDate === formatDateValue(new Date()))
       .map((record) => record.lmsId)
   );
 
   const attendanceByStudent = new Map();
-  filteredAttendanceRecords.forEach((record) => {
+  enrichedAttendanceRecords.forEach((record) => {
     if (!attendanceByStudent.has(record.lmsId)) {
       attendanceByStudent.set(record.lmsId, []);
     }
@@ -328,7 +440,11 @@ async function buildAttendanceSnapshot(query = {}) {
   const courseGroups = new Map();
   students.forEach((student) => {
     const studentRecords = attendanceByStudent.get(student.lmsId) || [];
-    const presentSessions = new Set(studentRecords.map((record) => buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record)))).size;
+    const presentSessions = new Set(
+      studentRecords
+        .filter((record) => record.status === 'present')
+        .map((record) => record.occurrenceKey || buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record)))
+    ).size;
     const courseKey = normalizeText(student.course) || 'Unassigned';
 
     if (!courseGroups.has(courseKey)) courseGroups.set(courseKey, { totalStudents: 0, presentSessions: 0 });
@@ -341,7 +457,11 @@ async function buildAttendanceSnapshot(query = {}) {
   const atRiskStudents = students
     .map((student) => {
       const studentRecords = attendanceByStudent.get(student.lmsId) || [];
-      const attendedSessionSet = new Set(studentRecords.map((record) => buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record))));
+      const attendedSessionSet = new Set(
+        studentRecords
+          .filter((record) => record.status === 'present')
+          .map((record) => record.occurrenceKey || buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record)))
+      );
       const presentSessions = attendedSessionSet.size;
       const attendancePercentage = getAttendanceRate(presentSessions, sessionsConducted);
       const missedSessions = Math.max(sessionsConducted - presentSessions, 0);
@@ -378,7 +498,11 @@ async function buildAttendanceSnapshot(query = {}) {
 
   const studentSummaries = students.map((student) => {
     const studentRecords = attendanceByStudent.get(student.lmsId) || [];
-    const attendedSessionSet = new Set(studentRecords.map((record) => buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record))));
+    const attendedSessionSet = new Set(
+      studentRecords
+        .filter((record) => record.status === 'present')
+        .map((record) => record.occurrenceKey || buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record)))
+    );
     const presentSessions = attendedSessionSet.size;
     const attendancePercentage = getAttendanceRate(presentSessions, sessionsConducted);
     const lastAttendanceRecord = studentRecords[studentRecords.length - 1] || null;
@@ -407,7 +531,9 @@ async function buildAttendanceSnapshot(query = {}) {
       return left.sessionId.localeCompare(right.sessionId);
     })
     .map((occurrence) => {
-      const uniqueStudents = occurrence.uniqueStudents.size;
+      const analytics = occurrenceAnalytics.get(occurrence.occurrenceKey);
+      const presentStudents = analytics?.presentStudentIds?.size || 0;
+      const joinedStudents = occurrence.uniqueStudents.size;
       return {
         occurrenceKey: occurrence.occurrenceKey,
         sessionId: occurrence.sessionId,
@@ -416,10 +542,13 @@ async function buildAttendanceSnapshot(query = {}) {
         course: occurrence.course,
         mentorName: occurrence.mentorName,
         className: occurrence.className,
-        presentCount: uniqueStudents,
-        uniqueStudents,
-        attendancePercentage: getAttendanceRate(uniqueStudents, Math.max(students.length, 1)),
-        attendanceDate: occurrence.attendanceDate || ''
+        presentCount: presentStudents,
+        uniqueStudents: joinedStudents,
+        joinedCount: joinedStudents,
+        attendancePercentage: getAttendanceRate(presentStudents, Math.max(students.length, 1)),
+        attendanceDate: occurrence.attendanceDate || '',
+        occurrenceDurationMinutes: analytics?.occurrenceDurationMinutes ?? 0,
+        thresholdMinutes: analytics?.thresholdMinutes ?? 0
       };
     });
 
@@ -431,7 +560,9 @@ async function buildAttendanceSnapshot(query = {}) {
   }));
 
   const trendMap = new Map();
-  filteredAttendanceRecords.forEach((record) => {
+  enrichedAttendanceRecords
+    .filter((record) => record.status === 'present')
+    .forEach((record) => {
     const dateKey = resolveAttendanceDate(record);
     if (!dateKey) return;
     if (!trendMap.has(dateKey)) {
@@ -441,10 +572,12 @@ async function buildAttendanceSnapshot(query = {}) {
     entry.present += 1;
     entry.students.add(record.lmsId);
     entry.sessions.add(buildOccurrenceKey(record.sessionId, dateKey));
-  });
+    });
 
   const monthlyMap = new Map();
-  filteredAttendanceRecords.forEach((record) => {
+  enrichedAttendanceRecords
+    .filter((record) => record.status === 'present')
+    .forEach((record) => {
     const attendedAt = record.attendedAt ? new Date(record.attendedAt) : null;
     if (!attendedAt || Number.isNaN(attendedAt.getTime())) return;
     const monthKey = `${attendedAt.getFullYear()}-${String(attendedAt.getMonth() + 1).padStart(2, '0')}`;
@@ -455,9 +588,9 @@ async function buildAttendanceSnapshot(query = {}) {
     entry.present += 1;
     entry.students.add(record.lmsId);
     entry.sessions.add(buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record)));
-  });
+    });
 
-  const totalPresentEntries = filteredAttendanceRecords.length;
+  const totalPresentEntries = enrichedAttendanceRecords.filter((record) => record.status === 'present').length;
   const totalPossibleEntries = students.length * Math.max(sessionsConducted, 1);
   const overallAttendancePercentage = totalPossibleEntries > 0 ? Math.round((totalPresentEntries / totalPossibleEntries) * 1000) / 10 : 0;
 
@@ -506,7 +639,7 @@ async function buildAttendanceSnapshot(query = {}) {
       .sort((left, right) => left.month.localeCompare(right.month)),
     atRiskStudents,
     students,
-    attendanceRecords: filteredAttendanceRecords,
+    attendanceRecords: enrichedAttendanceRecords,
     sessions: filteredSessions,
     totalStudentsFiltered: students.length,
     totalAttendanceEntries: totalPresentEntries
@@ -642,6 +775,9 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
       .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
       .sort({ attendedAt: 1 })
       .lean();
+    const occurrenceAnalytics = buildOccurrenceAnalytics(allRecords);
+    const occurrenceKey = buildOccurrenceKey(sessionId, attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || '');
+    const occurrenceInfo = occurrenceAnalytics.get(occurrenceKey);
 
     const total = allRecords.length;
     const totalPages = Math.max(Math.ceil(total / limit), 1);
@@ -656,12 +792,14 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
       session: {
         sessionId,
         sessionName: session?.title || allRecords[0]?.sessionName || sessionId,
-        occurrenceKey: buildOccurrenceKey(sessionId, attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || ''),
+        occurrenceKey,
         batch: formatSessionBatch(session) || allRecords[0]?.batch || '',
         course: Array.isArray(session?.courses) ? session.courses.join(', ') : (allRecords[0]?.course || ''),
         mentorName: session?.mentorName || allRecords[0]?.mentorName || '',
         className: session?.className || allRecords[0]?.className || '',
-        attendanceDate: attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || null
+        attendanceDate: attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || null,
+        occurrenceDurationMinutes: occurrenceInfo?.occurrenceDurationMinutes ?? 0,
+        thresholdMinutes: occurrenceInfo?.thresholdMinutes ?? 0
       },
       pagination: {
         page: safePage,
@@ -669,17 +807,24 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
         total,
         totalPages
       },
-      records: records.map((record) => ({
+      records: records.map((record) => {
+        const recordAttendanceDate = resolveAttendanceDate(record);
+        const recordOccurrenceKey = buildOccurrenceKey(record.sessionId, recordAttendanceDate);
+        const analytics = occurrenceAnalytics.get(recordOccurrenceKey);
+        const attendeeStats = analytics?.attendeeStats?.get(record.lmsId);
+
+        return {
         lmsId: record.lmsId,
         studentName: record.studentName,
         mobile: record.mobile || '',
         mentorName: record.mentorName || '',
         className: record.className || '',
         attendedAt: record.attendedAt,
-        attendanceDate: record.attendanceDate || null,
-        status: record.status || 'present',
-        durationMinutes: resolveDurationMinutes(record)
-      }))
+        attendanceDate: recordAttendanceDate || null,
+        status: attendeeStats?.status || record.status || 'absent',
+        durationMinutes: attendeeStats?.durationMinutes ?? resolveDurationMinutes(record)
+        };
+      })
     });
   } catch (error) {
     console.error('Error loading session attendance:', error.message);

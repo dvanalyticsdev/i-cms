@@ -50,6 +50,11 @@ const studentSchema = new mongoose.Schema(
       default: 'DEFAULT',
       trim: true,
       index: true
+    },
+    feeStatusException: {
+      type: Boolean,
+      default: false,
+      index: true
     }
   },
   {

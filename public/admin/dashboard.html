@@ -553,12 +553,13 @@
                             <th>Year</th>
                             <th>Course</th>
                             <th>Payment</th>
+                            <th>Fee Exception</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="studentsList">
                         <tr class="loading-row">
-                            <td colspan="9" style="text-align: center; padding: 40px;">
+                            <td colspan="10" style="text-align: center; padding: 40px;">
                                 <div class="spinner"></div>
                                 <p>Loading students...</p>
                             </td>
@@ -1171,6 +1172,14 @@
                             <option value="DEFAULT">DEFAULT</option>
                             <option value="FULLY PAID">FULLY PAID</option>
                             <option value="PENDING">PENDING</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Fee Exception</label>
+                        <select id="studentFeeStatusException" class="form-input">
+                            <option value="false">No</option>
+                            <option value="true">Yes</option>
                         </select>
                     </div>
 

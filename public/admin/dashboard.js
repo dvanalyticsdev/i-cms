@@ -2488,7 +2488,7 @@ function renderStudents() {
         if (allStudents.length === 0) {
             studentsList.innerHTML = `
                 <tr>
-                        <td colspan="8" style="text-align: center; padding: 40px;">
+                        <td colspan="10" style="text-align: center; padding: 40px;">
                         <p style="color: #999;">No students found. <a href="#" onclick="openAddStudentModal(); return false;" style="color: #667eea;">Add one now</a></p>
                     </td>
                 </tr>
@@ -2496,7 +2496,7 @@ function renderStudents() {
         } else {
             studentsList.innerHTML = `
                 <tr>
-                        <td colspan="8" style="text-align: center; padding: 40px;">
+                        <td colspan="10" style="text-align: center; padding: 40px;">
                         <p style="color: #999;">No matching students found. Try adjusting your search or filters.</p>
                     </td>
                 </tr>
@@ -2515,6 +2515,7 @@ function renderStudents() {
             <td>${escapeHtml(student.year || '-')}</td>
             <td>${escapeHtml(student.course || '-')}</td>
             <td>${escapeHtml(student.paymentStatus || 'DEFAULT')}</td>
+            <td>${student.feeStatusException ? 'Yes' : 'No'}</td>
             <td>
                 <div class="actions">
                     <button class="btn-action edit" onclick="openEditStudentModal('${escapeHtml(student.lmsId)}')" title="Edit">Edit</button>
@@ -2600,6 +2601,7 @@ function openAddStudentModal() {
     document.getElementById('studentEmailId').value = '';
     document.getElementById('studentYear').value = '';
     document.getElementById('studentPaymentStatus').value = 'DEFAULT';
+    document.getElementById('studentFeeStatusException').value = 'false';
     document.getElementById('studentModalTitle').textContent = 'Add New Student';
     document.getElementById('studentSubmitText').textContent = 'Add Student';
     document.getElementById('studentLmsId').disabled = false;
@@ -2624,6 +2626,7 @@ function openEditStudentModal(lmsId) {
     document.getElementById('studentEmailId').value = student.emailId || '';
     document.getElementById('studentYear').value = student.year || '';
     document.getElementById('studentPaymentStatus').value = student.paymentStatus || 'DEFAULT';
+    document.getElementById('studentFeeStatusException').value = student.feeStatusException ? 'true' : 'false';
     document.getElementById('studentModalTitle').textContent = 'Edit Student';
     document.getElementById('studentSubmitText').textContent = 'Save Changes';
     document.getElementById('studentLmsId').disabled = true;  // Cannot change LMS ID
@@ -2654,6 +2657,7 @@ async function handleSaveStudent(event) {
     const year = document.getElementById('studentYear').value.trim();
     const course = document.getElementById('studentCourse').value.trim();
     const paymentStatus = document.getElementById('studentPaymentStatus').value;
+    const feeStatusException = document.getElementById('studentFeeStatusException').value === 'true';
 
     if (!lmsId || !batch || !name || !course) {
         showToast('Please fill in LMS ID, Name, Batch, and Course', 'error');
@@ -2670,7 +2674,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ name, mobile, emailId, batch, course, year, paymentStatus })
+                body: JSON.stringify({ name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException })
             });
         } else {
             // Add new student
@@ -2680,7 +2684,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ lmsId, name, mobile, emailId, batch, course, year, paymentStatus })
+                body: JSON.stringify({ lmsId, name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException })
             });
         }
 
@@ -3356,7 +3360,8 @@ function renderAttendanceDetailTable() {
     const start = pagination.total === 0 ? 0 : ((pagination.page - 1) * pagination.limit) + 1;
     const end = pagination.total === 0 ? 0 : Math.min(start + records.length - 1, pagination.total);
     const attendanceDateLabel = session.attendanceDate ? ` • ${escapeHtml(session.attendanceDate)}` : '';
-    detailMeta.textContent = `${session.sessionName || session.sessionId}${attendanceDateLabel} • ${pagination.total || 0} student(s) joined${pagination.total > pagination.limit ? ` • Showing ${start}-${end}` : ''}`;
+    const thresholdLabel = session.thresholdMinutes > 0 ? ` • Present if >= ${escapeHtml(formatDuration(session.thresholdMinutes))}` : ' • Present if >= 80% of class';
+    detailMeta.textContent = `${session.sessionName || session.sessionId}${attendanceDateLabel} • ${pagination.total || 0} student(s) joined${thresholdLabel}${pagination.total > pagination.limit ? ` • Showing ${start}-${end}` : ''}`;
 
     if (records.length === 0) {
         detailList.innerHTML = `
@@ -3378,7 +3383,7 @@ function renderAttendanceDetailTable() {
             <td>${escapeHtml(record.mentorName || session.mentorName || '-')}</td>
             <td>${record.attendedAt ? escapeHtml(formatAttendanceDateTime(record.attendedAt)) : '-'}</td>
             <td>${escapeHtml(formatDuration(record.durationMinutes))}</td>
-            <td><span class="risk-pill" style="background: rgba(72, 187, 120, 0.12); color: #276749;">${escapeHtml(record.status || 'present')}</span></td>
+            <td><span class="risk-pill" style="${getAttendanceStatusPillStyle(record.status)}">${escapeHtml(record.status || 'absent')}</span></td>
         </tr>
     `).join('');
 
@@ -3683,6 +3688,12 @@ function formatDuration(durationMinutes) {
     }
 
     return `${hours}h ${minutes}m`;
+}
+
+function getAttendanceStatusPillStyle(status) {
+    return String(status || '').toLowerCase() === 'present'
+        ? 'background: rgba(72, 187, 120, 0.12); color: #276749;'
+        : 'background: rgba(245, 101, 101, 0.12); color: #9b2c2c;';
 }
 
 function formatIndianSessionLogDate(dateString) {

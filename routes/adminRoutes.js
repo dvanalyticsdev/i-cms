@@ -13,7 +13,7 @@ const SessionLog = require('../models/SessionLog');
 const { logSessionActivity, getTimestampParts } = require('../utils/sessionLogger');
 const { sanitizeLmsId } = require('../utils/studentValidation');
 const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
-const { normalizePaymentStatus } = require('../utils/classAccess');
+const { normalizePaymentStatus, normalizeFeeStatusException } = require('../utils/classAccess');
 const CLASS_ACCESS_PAYMENT_STATUSES = ['DEFAULT', 'FULLY PAID', 'PENDING'];
 const SESSION_LOG_ALLOWED_ACTIONS = ['Created Session', 'Updated Session', 'Session Status Updated', 'Deleted Session'];
 const { syncWorkbookData } = require('../utils/workbookSync');
@@ -1274,7 +1274,7 @@ router.get('/students', authMiddleware, async (req, res) => {
  */
 router.post('/students', authMiddleware, async (req, res) => {
   try {
-    const { lmsId, name, mobile, emailId, batch, course, year, paymentStatus } = req.body;
+    const { lmsId, name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
     const normalizedBatch = normalizeText(batch);
     const normalizedCourse = normalizeText(course);
@@ -1296,7 +1296,8 @@ router.post('/students', authMiddleware, async (req, res) => {
       batch: normalizedBatch,
       course: normalizedCourse,
       year: normalizeText(year),
-      paymentStatus: normalizePaymentStatus(paymentStatus)
+      paymentStatus: normalizePaymentStatus(paymentStatus),
+      feeStatusException: normalizeFeeStatusException(feeStatusException)
     });
     
     await newStudent.save();
@@ -1315,7 +1316,7 @@ router.post('/students', authMiddleware, async (req, res) => {
 router.put('/students/:lmsId', authMiddleware, async (req, res) => {
   try {
     const { lmsId } = req.params;
-    const { name, mobile, emailId, batch, course, year, paymentStatus } = req.body;
+    const { name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
     const normalizedBatch = normalizeText(batch);
     const normalizedCourse = normalizeText(course);
@@ -1338,7 +1339,8 @@ router.put('/students/:lmsId', authMiddleware, async (req, res) => {
         batch: normalizedBatch,
         course: normalizedCourse,
         year: normalizeText(year),
-        paymentStatus: normalizePaymentStatus(paymentStatus)
+        paymentStatus: normalizePaymentStatus(paymentStatus),
+        feeStatusException: normalizeFeeStatusException(feeStatusException)
       },
       { new: true }
     ).lean();

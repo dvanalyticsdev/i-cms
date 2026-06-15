@@ -8,12 +8,18 @@ const AttendanceRecord = require('../models/AttendanceRecord');
 const { sanitizeLmsId } = require('../utils/studentValidation');
 const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
 const { findStudentInWorkbook } = require('../utils/workbookSync');
+const { getEffectivePaymentStatus } = require('../utils/classAccess');
 
 function normalize(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 function resolvePaymentStatus(studentRecord, lmsId) {
+  const effectiveMongoStatus = String(getEffectivePaymentStatus(studentRecord) || '').trim().toUpperCase();
+  if (effectiveMongoStatus && effectiveMongoStatus !== 'DEFAULT') {
+    return effectiveMongoStatus;
+  }
+
   const mongoStatus = String(studentRecord?.paymentStatus || '').trim().toUpperCase();
   if (mongoStatus) {
     return mongoStatus;
