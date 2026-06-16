@@ -422,7 +422,6 @@ function hideSessionSelection() {
   if (sessionsScreen) {
     sessionsScreen.classList.add('hidden');
   }
-  stopSessionHeartbeat();
 }
 
 // ====================================

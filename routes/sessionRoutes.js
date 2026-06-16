@@ -185,7 +185,7 @@ router.post('/join-session', async (req, res) => {
         const existingActiveSession = await ActiveSession.findOne({ lmsId, status: 'active' });
 
         if (existingActiveSession) {
-          const endedAt = existingActiveSession.lastSeenAt || existingActiveSession.joinedAt || new Date();
+          const endedAt = new Date();
           await finalizeAttendanceForActiveSession(existingActiveSession, endedAt);
         }
 

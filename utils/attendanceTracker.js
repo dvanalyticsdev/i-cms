@@ -70,13 +70,16 @@ async function recordSessionJoin({
   existingRecord.mentorName = mentorName;
   existingRecord.className = className;
   existingRecord.attendanceDate = attendanceDate;
-  existingRecord.attendedAt = joinedAt;
   existingRecord.lastSeenAt = joinedAt;
   existingRecord.status = 'present';
   existingRecord.source = source;
 
   if (!existingRecord.firstJoinedAt) {
     existingRecord.firstJoinedAt = joinedAt;
+  }
+
+  if (!existingRecord.attendedAt) {
+    existingRecord.attendedAt = existingRecord.firstJoinedAt || joinedAt;
   }
 
   if (!existingRecord.currentJoinStartedAt) {

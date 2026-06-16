@@ -108,7 +108,7 @@ router.post('/verify-student', async (req, res) => {
         });
       }
       
-      const endedAt = existingSession.lastSeenAt || existingSession.joinedAt || new Date();
+      const endedAt = new Date();
       await finalizeAttendanceForActiveSession(existingSession, endedAt);
       existingSession.status = 'ended';
       existingSession.endedAt = endedAt;
@@ -198,7 +198,7 @@ router.post('/force-logout', async (req, res) => {
 
     const activeSession = await ActiveSession.findOne({ lmsId: sanitizedLmsId, status: 'active' });
     if (activeSession) {
-      const endedAt = activeSession.lastSeenAt || activeSession.joinedAt || new Date();
+      const endedAt = new Date();
       await finalizeAttendanceForActiveSession(activeSession, endedAt);
       activeSession.status = 'ended';
       activeSession.endedAt = endedAt;
@@ -242,7 +242,7 @@ router.post('/logout', async (req, res) => {
       });
     }
 
-    const endedAt = activeSession.lastSeenAt || activeSession.joinedAt || new Date();
+    const endedAt = new Date();
     await finalizeAttendanceForActiveSession(activeSession, endedAt);
     activeSession.status = 'ended';
     activeSession.endedAt = endedAt;
