@@ -142,7 +142,7 @@ async function finalizeAttendanceForActiveSession(activeSession, endedAt = new D
   return record.toObject();
 }
 
-async function autoFinalizeStaleSessions(timeoutMs = 120000) { // Default 2 minutes
+async function autoFinalizeStaleSessions(timeoutMs = 6 * 60 * 60 * 1000) { // Default 6 hours
   const cutoffTime = new Date(Date.now() - timeoutMs);
 
   try {

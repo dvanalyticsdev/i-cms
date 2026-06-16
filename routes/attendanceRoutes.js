@@ -4,6 +4,7 @@ const authMiddleware = require('../middleware/authMiddleware');
 const Student = require('../models/Student');
 const ClassSession = require('../models/ClassSession');
 const AttendanceRecord = require('../models/AttendanceRecord');
+const ActiveSession = require('../models/ActiveSession');
 const { logSessionActivity } = require('../utils/sessionLogger');
 
 const PRESENT_ATTENDANCE_THRESHOLD = 0.8;
@@ -222,6 +223,27 @@ function resolveRecordEndedAt(record) {
     .sort((left, right) => right.getTime() - left.getTime())[0] || null;
 }
 
+function mergeRecordWithActiveSession(record, activeSession) {
+  if (!record || !activeSession) {
+    return record;
+  }
+
+  const activeJoinedAt = toValidDate(activeSession.joinedAt);
+  const activeLastSeenAt = toValidDate(activeSession.lastSeenAt) || new Date();
+  const currentJoinStartedAt = toValidDate(record.currentJoinStartedAt) || activeJoinedAt;
+  const firstJoinedAt = toValidDate(record.firstJoinedAt) || activeJoinedAt;
+  const attendedAt = toValidDate(record.attendedAt) || firstJoinedAt || activeJoinedAt;
+
+  return {
+    ...record,
+    attendedAt: attendedAt || record.attendedAt,
+    firstJoinedAt: firstJoinedAt || record.firstJoinedAt,
+    currentJoinStartedAt: currentJoinStartedAt || record.currentJoinStartedAt,
+    lastSeenAt: activeLastSeenAt,
+    leftAt: null
+  };
+}
+
 function buildOccurrenceAnalytics(records = []) {
   const recordsByOccurrence = new Map();
 
@@ -300,13 +322,16 @@ async function buildAttendanceSnapshot(query = {}) {
     sessionQuery.mentorName = query.mentorName;
   }
 
-  const [students, attendanceRecords, sessions] = await Promise.all([
+  const [students, attendanceRecords, sessions, activeSessions] = await Promise.all([
     Student.find(studentQuery).select('lmsId name mobile batch course createdAt').lean(),
     AttendanceRecord.find(attendanceMatch)
       .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
       .sort({ attendedAt: 1 })
       .lean(),
-    ClassSession.find(sessionQuery).select('sessionId title mentorName className batch batches courses createdAt').sort({ createdAt: -1 }).lean()
+    ClassSession.find(sessionQuery).select('sessionId title mentorName className batch batches courses createdAt').sort({ createdAt: -1 }).lean(),
+    ActiveSession.find({ status: 'active' })
+      .select('lmsId classSessionId joinedAt lastSeenAt status')
+      .lean()
   ]);
 
   const filteredSessions = sessions.filter((session) => {
@@ -330,7 +355,14 @@ async function buildAttendanceSnapshot(query = {}) {
 
   const sessionsById = new Map(filteredSessions.map((session) => [session.sessionId, session]));
   const relevantSessionIds = new Set(filteredSessions.map((session) => session.sessionId));
-  const relevantAttendanceRecords = attendanceRecords.filter((record) => relevantSessionIds.has(record.sessionId));
+  const activeSessionsByKey = new Map(
+    activeSessions
+      .filter((session) => session.lmsId && session.classSessionId && relevantSessionIds.has(session.classSessionId))
+      .map((session) => [`${session.lmsId}__${session.classSessionId}`, session])
+  );
+  const relevantAttendanceRecords = attendanceRecords
+    .filter((record) => relevantSessionIds.has(record.sessionId))
+    .map((record) => mergeRecordWithActiveSession(record, activeSessionsByKey.get(`${record.lmsId}__${record.sessionId}`)));
 
   const occurrenceMap = new Map();
   relevantAttendanceRecords.forEach((record) => {
@@ -771,10 +803,17 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
     const attendanceMatch = buildAttendanceMatch({ ...req.query, sessionId }, window);
-    const allRecords = await AttendanceRecord.find(attendanceMatch)
-      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
-      .sort({ attendedAt: 1 })
-      .lean();
+    const [rawRecords, activeSessions] = await Promise.all([
+      AttendanceRecord.find(attendanceMatch)
+        .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
+        .sort({ attendedAt: 1 })
+        .lean(),
+      ActiveSession.find({ status: 'active', classSessionId: sessionId })
+        .select('lmsId classSessionId joinedAt lastSeenAt status')
+        .lean()
+    ]);
+    const activeSessionsByLmsId = new Map(activeSessions.map((session) => [session.lmsId, session]));
+    const allRecords = rawRecords.map((record) => mergeRecordWithActiveSession(record, activeSessionsByLmsId.get(record.lmsId)));
     const occurrenceAnalytics = buildOccurrenceAnalytics(allRecords);
     const occurrenceKey = buildOccurrenceKey(sessionId, attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || '');
     const occurrenceInfo = occurrenceAnalytics.get(occurrenceKey);

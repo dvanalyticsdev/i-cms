@@ -64,7 +64,9 @@ const initializeDatabase = async () => {
       // ignore legacy phone index cleanup issues on fresh databases
     }
 
-    // Start background finalizer to run every 1 minute
+    // Start background finalizer to run every 1 minute.
+    // The timeout inside autoFinalizeStaleSessions is intentionally long so
+    // an in-progress Zoom session is not ended after a brief heartbeat gap.
     setInterval(async () => {
       try {
         if (mongoose.connection.readyState === 1) {
