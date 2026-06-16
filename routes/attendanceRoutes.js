@@ -312,7 +312,29 @@ function reviveLikelyAutoFinalizedRecord(record, session) {
   return record;
 }
 
-function buildOccurrenceAnalytics(records = []) {
+function shouldRepairPrematurelyEndedRecord(record, occurrenceEnd, occurrenceDurationMinutes, sessionStatus = '') {
+  if (!record || !occurrenceEnd) {
+    return false;
+  }
+
+  const attendanceDate = resolveAttendanceDate(record);
+  const today = formatDateValue(new Date());
+  const normalizedSessionStatus = normalizeText(sessionStatus).toLowerCase();
+  const startedAt = resolveRecordStartedAt(record);
+  const endedAt = resolveRecordEndedAt(record);
+  const partialThresholdMinutes = occurrenceDurationMinutes * PARTIAL_ATTENDANCE_THRESHOLD;
+
+  if (attendanceDate !== today || normalizedSessionStatus !== 'on' || record.currentJoinStartedAt || !startedAt || !endedAt) {
+    return false;
+  }
+
+  const durationMinutes = Math.max((endedAt.getTime() - startedAt.getTime()) / 60000, 0);
+  const minutesBehindOccurrenceEnd = Math.max((occurrenceEnd.getTime() - endedAt.getTime()) / 60000, 0);
+
+  return durationMinutes < partialThresholdMinutes && minutesBehindOccurrenceEnd >= 10;
+}
+
+function buildOccurrenceAnalytics(records = [], occurrenceSessionStatusByKey = new Map()) {
   const recordsByOccurrence = new Map();
 
   records.forEach((record) => {
@@ -338,15 +360,21 @@ function buildOccurrenceAnalytics(records = []) {
       .map(resolveRecordEndedAt)
       .filter(Boolean)
       .sort((left, right) => right.getTime() - left.getTime());
+    const occurrenceEnd = endTimes[0] || null;
     const occurrenceDurationMinutes = startTimes.length > 0 && endTimes.length > 0
       ? Math.max((endTimes[0].getTime() - startTimes[0].getTime()) / 60000, 0)
       : 0;
     const thresholdMinutes = occurrenceDurationMinutes * PRESENT_ATTENDANCE_THRESHOLD;
     const partialThresholdMinutes = occurrenceDurationMinutes * PARTIAL_ATTENDANCE_THRESHOLD;
     const attendeeStats = new Map();
+    const sessionStatus = occurrenceSessionStatusByKey.get(occurrenceKey) || '';
 
     occurrenceRecords.forEach((record) => {
-      const durationMinutes = resolveDurationMinutes(record);
+      const startedAt = resolveRecordStartedAt(record);
+      const shouldRepair = shouldRepairPrematurelyEndedRecord(record, occurrenceEnd, occurrenceDurationMinutes, sessionStatus);
+      const durationMinutes = shouldRepair && startedAt && occurrenceEnd
+        ? Math.round((Math.max(occurrenceEnd.getTime() - startedAt.getTime(), 0) / 60000) * 10) / 10
+        : resolveDurationMinutes(record);
       const attendance = resolveAttendanceStatus(durationMinutes, occurrenceDurationMinutes);
 
       attendeeStats.set(record.lmsId, {
@@ -508,7 +536,13 @@ async function buildAttendanceSnapshot(query = {}) {
     const attendanceDate = resolveAttendanceDate(record);
     return attendanceDate && relevantOccurrenceKeys.has(buildOccurrenceKey(record.sessionId, attendanceDate));
   });
-  const occurrenceAnalytics = buildOccurrenceAnalytics(filteredAttendanceRecords);
+  const occurrenceSessionStatusByKey = new Map(
+    occurrenceSummaries.map((occurrence) => [
+      occurrence.occurrenceKey,
+      sessionsById.get(occurrence.sessionId)?.status || ''
+    ])
+  );
+  const occurrenceAnalytics = buildOccurrenceAnalytics(filteredAttendanceRecords, occurrenceSessionStatusByKey);
   const enrichedAttendanceRecords = filteredAttendanceRecords.map((record) => {
     const attendanceDate = resolveAttendanceDate(record);
     const occurrenceKey = buildOccurrenceKey(record.sessionId, attendanceDate);
@@ -772,8 +806,11 @@ async function loadSessionAttendanceData(sessionId, query = {}) {
     const liveRecord = mergeRecordWithActiveSession(record, activeSessionsByLmsId.get(record.lmsId));
     return reviveLikelyAutoFinalizedRecord(liveRecord, session || { status: 'off' });
   });
-  const occurrenceAnalytics = buildOccurrenceAnalytics(allRecords);
   const occurrenceKey = buildOccurrenceKey(sessionId, attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || '');
+  const occurrenceAnalytics = buildOccurrenceAnalytics(
+    allRecords,
+    new Map([[occurrenceKey, session?.status || '']])
+  );
   const occurrenceInfo = occurrenceAnalytics.get(occurrenceKey);
   const records = allRecords.map((record) => {
     const recordAttendanceDate = resolveAttendanceDate(record);
