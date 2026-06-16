@@ -244,6 +244,38 @@ function mergeRecordWithActiveSession(record, activeSession) {
   };
 }
 
+function reviveLikelyAutoFinalizedRecord(record, session) {
+  if (!record || !session) {
+    return record;
+  }
+
+  const attendanceDate = resolveAttendanceDate(record);
+  const today = formatDateValue(new Date());
+  const sessionStatus = normalizeText(session.status).toLowerCase();
+  const startedAt = resolveRecordStartedAt(record);
+  const endedAt = resolveRecordEndedAt(record);
+  const storedDurationMinutes = Math.max(Number(record.durationMinutes || 0), 0);
+
+  if (attendanceDate !== today || sessionStatus !== 'on' || record.currentJoinStartedAt || !startedAt || !endedAt) {
+    return record;
+  }
+
+  const minutesUntilEnded = Math.max((endedAt.getTime() - startedAt.getTime()) / 60000, 0);
+  const occurrenceAgeMinutes = Math.max((Date.now() - startedAt.getTime()) / 60000, 0);
+
+  // Recover rows that were prematurely auto-finalized after only a couple of minutes.
+  if (storedDurationMinutes <= 5.5 && minutesUntilEnded <= 5.5 && occurrenceAgeMinutes >= 10) {
+    return {
+      ...record,
+      currentJoinStartedAt: startedAt,
+      lastSeenAt: new Date(),
+      leftAt: null
+    };
+  }
+
+  return record;
+}
+
 function buildOccurrenceAnalytics(records = []) {
   const recordsByOccurrence = new Map();
 
@@ -328,7 +360,7 @@ async function buildAttendanceSnapshot(query = {}) {
       .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
       .sort({ attendedAt: 1 })
       .lean(),
-    ClassSession.find(sessionQuery).select('sessionId title mentorName className batch batches courses createdAt').sort({ createdAt: -1 }).lean(),
+    ClassSession.find(sessionQuery).select('sessionId title mentorName className batch batches courses status createdAt').sort({ createdAt: -1 }).lean(),
     ActiveSession.find({ status: 'active' })
       .select('lmsId classSessionId joinedAt lastSeenAt status')
       .lean()
@@ -362,7 +394,11 @@ async function buildAttendanceSnapshot(query = {}) {
   );
   const relevantAttendanceRecords = attendanceRecords
     .filter((record) => relevantSessionIds.has(record.sessionId))
-    .map((record) => mergeRecordWithActiveSession(record, activeSessionsByKey.get(`${record.lmsId}__${record.sessionId}`)));
+    .map((record) => {
+      const session = sessionsById.get(record.sessionId);
+      const liveRecord = mergeRecordWithActiveSession(record, activeSessionsByKey.get(`${record.lmsId}__${record.sessionId}`));
+      return reviveLikelyAutoFinalizedRecord(liveRecord, session);
+    });
 
   const occurrenceMap = new Map();
   relevantAttendanceRecords.forEach((record) => {
@@ -803,6 +839,7 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
     const attendanceMatch = buildAttendanceMatch({ ...req.query, sessionId }, window);
+    const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch batches className courses mentorName status').lean();
     const [rawRecords, activeSessions] = await Promise.all([
       AttendanceRecord.find(attendanceMatch)
         .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
@@ -813,7 +850,10 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
         .lean()
     ]);
     const activeSessionsByLmsId = new Map(activeSessions.map((session) => [session.lmsId, session]));
-    const allRecords = rawRecords.map((record) => mergeRecordWithActiveSession(record, activeSessionsByLmsId.get(record.lmsId)));
+    const allRecords = rawRecords.map((record) => {
+      const liveRecord = mergeRecordWithActiveSession(record, activeSessionsByLmsId.get(record.lmsId));
+      return reviveLikelyAutoFinalizedRecord(liveRecord, session || { status: 'off' });
+    });
     const occurrenceAnalytics = buildOccurrenceAnalytics(allRecords);
     const occurrenceKey = buildOccurrenceKey(sessionId, attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || '');
     const occurrenceInfo = occurrenceAnalytics.get(occurrenceKey);
@@ -822,8 +862,6 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     const totalPages = Math.max(Math.ceil(total / limit), 1);
     const safePage = Math.min(page, totalPages);
     const records = allRecords.slice((safePage - 1) * limit, safePage * limit);
-
-    const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch batches className courses mentorName').lean();
 
     return res.status(200).json({
       success: true,
