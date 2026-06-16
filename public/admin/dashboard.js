@@ -3326,11 +3326,68 @@ async function clearSelectedAttendanceOccurrence() {
     }
 }
 
+async function exportSelectedAttendanceOccurrence() {
+    const session = attendanceInsightsState.selectedSession;
+    const sessionId = session?.sessionId || '';
+    const attendanceDate = session?.attendanceDate || '';
+
+    if (!sessionId || !attendanceDate) {
+        showToast('Select a dated session occurrence first', 'error');
+        return;
+    }
+
+    try {
+        const filters = collectAttendanceFilters();
+        const params = new URLSearchParams({
+            timeframe: filters.timeframe,
+            from: filters.from,
+            to: filters.to,
+            batch: filters.batch,
+            course: filters.course,
+            mentorName: filters.mentorName,
+            attendanceDate
+        });
+
+        const response = await fetch(`${API_BASE_URL}/attendance/session/${encodeURIComponent(sessionId)}/export?${params.toString()}`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => null);
+            throw new Error(data?.message || 'Failed to export attendance');
+        }
+
+        const blob = await response.blob();
+        const downloadUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const contentDisposition = response.headers.get('Content-Disposition') || '';
+        const fileNameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+        link.href = downloadUrl;
+        link.download = fileNameMatch?.[1] || `${sessionId}-${attendanceDate}.xlsx`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(downloadUrl);
+        showToast('Attendance export started', 'success');
+    } catch (error) {
+        console.error('Error exporting attendance occurrence:', error);
+        showToast(error.message || 'Failed to export attendance', 'error');
+    }
+}
+
 function renderAttendanceDetailTable() {
     const detailMeta = document.getElementById('attendanceDetailMeta');
     const detailList = document.getElementById('attendanceDetailList');
     const detailPagination = document.getElementById('attendanceDetailPagination');
     const clearButton = document.getElementById('clearAttendanceOccurrenceButton');
+    const exportButton = document.getElementById('exportAttendanceOccurrenceButton');
     if (!detailMeta || !detailList) return;
 
     const session = attendanceInsightsState.selectedSession;
@@ -3347,6 +3404,9 @@ function renderAttendanceDetailTable() {
         if (clearButton) {
             clearButton.classList.add('hidden');
         }
+        if (exportButton) {
+            exportButton.classList.add('hidden');
+        }
         if (detailPagination) {
             detailPagination.innerHTML = '';
         }
@@ -3356,11 +3416,16 @@ function renderAttendanceDetailTable() {
     if (clearButton) {
         clearButton.classList.toggle('hidden', !session.attendanceDate);
     }
+    if (exportButton) {
+        exportButton.classList.toggle('hidden', !session.attendanceDate);
+    }
 
     const start = pagination.total === 0 ? 0 : ((pagination.page - 1) * pagination.limit) + 1;
     const end = pagination.total === 0 ? 0 : Math.min(start + records.length - 1, pagination.total);
     const attendanceDateLabel = session.attendanceDate ? ` • ${escapeHtml(session.attendanceDate)}` : '';
-    const thresholdLabel = session.thresholdMinutes > 0 ? ` • Present if >= ${escapeHtml(formatDuration(session.thresholdMinutes))}` : ' • Present if >= 80% of class';
+    const thresholdLabel = session.thresholdMinutes > 0
+        ? ` • Present if >= ${escapeHtml(formatDuration(session.thresholdMinutes))} • Partial if >= ${escapeHtml(formatDuration(session.partialThresholdMinutes || 0))}`
+        : ' • Present if >= 80% • Partial if >= 30% • Low present below 30%';
     detailMeta.textContent = `${session.sessionName || session.sessionId}${attendanceDateLabel} • ${pagination.total || 0} student(s) joined${thresholdLabel}${pagination.total > pagination.limit ? ` • Showing ${start}-${end}` : ''}`;
 
     if (records.length === 0) {
@@ -3383,7 +3448,7 @@ function renderAttendanceDetailTable() {
             <td>${escapeHtml(record.mentorName || session.mentorName || '-')}</td>
             <td>${record.attendedAt ? escapeHtml(formatAttendanceDateTime(record.attendedAt)) : '-'}</td>
             <td>${escapeHtml(formatDuration(record.durationMinutes))}</td>
-            <td><span class="risk-pill" style="${getAttendanceStatusPillStyle(record.status)}">${escapeHtml(record.status || 'absent')}</span></td>
+            <td><span class="risk-pill" style="${getAttendanceStatusPillStyle(record.status)}">${escapeHtml(formatAttendanceStatusLabel(record.status || 'low present'))}</span></td>
         </tr>
     `).join('');
 
@@ -3691,9 +3756,27 @@ function formatDuration(durationMinutes) {
 }
 
 function getAttendanceStatusPillStyle(status) {
-    return String(status || '').toLowerCase() === 'present'
-        ? 'background: rgba(72, 187, 120, 0.12); color: #276749;'
-        : 'background: rgba(245, 101, 101, 0.12); color: #9b2c2c;';
+    const normalizedStatus = String(status || '').toLowerCase();
+    if (normalizedStatus === 'present') {
+        return 'background: rgba(72, 187, 120, 0.12); color: #276749;';
+    }
+
+    if (normalizedStatus === 'partial present') {
+        return 'background: rgba(237, 137, 54, 0.14); color: #9c4221;';
+    }
+
+    return 'background: rgba(245, 101, 101, 0.12); color: #9b2c2c;';
+}
+
+function formatAttendanceStatusLabel(status) {
+    const normalizedStatus = String(status || '').toLowerCase();
+    if (normalizedStatus === 'present') {
+        return 'Present';
+    }
+    if (normalizedStatus === 'partial present') {
+        return 'Partial Present';
+    }
+    return 'Low Present';
 }
 
 function formatIndianSessionLogDate(dateString) {

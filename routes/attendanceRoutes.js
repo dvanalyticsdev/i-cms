@@ -8,6 +8,7 @@ const ActiveSession = require('../models/ActiveSession');
 const { logSessionActivity } = require('../utils/sessionLogger');
 
 const PRESENT_ATTENDANCE_THRESHOLD = 0.8;
+const PARTIAL_ATTENDANCE_THRESHOLD = 0.3;
 
 function ensureAdminRole(req, res) {
   if (!req.admin || req.admin.role !== 'admin') {
@@ -159,8 +160,43 @@ function resolveAttendanceDate(record) {
   return normalizeText(record?.attendanceDate) || formatDateValue(record?.attendedAt) || formatDateValue(record?.createdAt) || '';
 }
 
+function sanitizeSheetName(value, fallback = 'Attendance') {
+  const sanitized = String(value || fallback)
+    .replace(/[\\/*?:[\]]/g, ' ')
+    .trim()
+    .slice(0, 31);
+  return sanitized || fallback;
+}
+
+function sanitizeFileName(value, fallback = 'attendance') {
+  const sanitized = String(value || fallback)
+    .replace(/[<>:"/\\|?*]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return sanitized || fallback;
+}
+
 function buildOccurrenceKey(sessionId, attendanceDate) {
   return `${normalizeText(sessionId)}__${normalizeText(attendanceDate || 'undated')}`;
+}
+
+function resolveAttendanceStatus(durationMinutes, occurrenceDurationMinutes) {
+  const safeDurationMinutes = Math.max(Number(durationMinutes || 0), 0);
+  const safeOccurrenceDurationMinutes = Math.max(Number(occurrenceDurationMinutes || 0), 0);
+  const attendanceRatio = safeOccurrenceDurationMinutes > 0
+    ? safeDurationMinutes / safeOccurrenceDurationMinutes
+    : (safeDurationMinutes > 0 ? 1 : 0);
+  const attendancePercentage = Math.round(attendanceRatio * 1000) / 10;
+
+  if (attendanceRatio >= PRESENT_ATTENDANCE_THRESHOLD) {
+    return { status: 'present', attendancePercentage };
+  }
+
+  if (attendanceRatio >= PARTIAL_ATTENDANCE_THRESHOLD) {
+    return { status: 'partial present', attendancePercentage };
+  }
+
+  return { status: 'low present', attendancePercentage };
 }
 
 function resolveDurationMinutes(record) {
@@ -306,23 +342,24 @@ function buildOccurrenceAnalytics(records = []) {
       ? Math.max((endTimes[0].getTime() - startTimes[0].getTime()) / 60000, 0)
       : 0;
     const thresholdMinutes = occurrenceDurationMinutes * PRESENT_ATTENDANCE_THRESHOLD;
+    const partialThresholdMinutes = occurrenceDurationMinutes * PARTIAL_ATTENDANCE_THRESHOLD;
     const attendeeStats = new Map();
 
     occurrenceRecords.forEach((record) => {
       const durationMinutes = resolveDurationMinutes(record);
-      const isPresent = occurrenceDurationMinutes > 0
-        ? durationMinutes >= thresholdMinutes
-        : durationMinutes > 0;
+      const attendance = resolveAttendanceStatus(durationMinutes, occurrenceDurationMinutes);
 
       attendeeStats.set(record.lmsId, {
         durationMinutes,
-        status: isPresent ? 'present' : 'absent'
+        status: attendance.status,
+        attendancePercentage: attendance.attendancePercentage
       });
     });
 
     analyticsByOccurrence.set(occurrenceKey, {
       occurrenceDurationMinutes: Math.round(occurrenceDurationMinutes * 10) / 10,
       thresholdMinutes: Math.round(thresholdMinutes * 10) / 10,
+      partialThresholdMinutes: Math.round(partialThresholdMinutes * 10) / 10,
       attendeeStats,
       presentStudentIds: new Set(
         Array.from(attendeeStats.entries())
@@ -483,9 +520,11 @@ async function buildAttendanceSnapshot(query = {}) {
       attendanceDate,
       occurrenceKey,
       durationMinutes: attendeeStats?.durationMinutes ?? resolveDurationMinutes(record),
-      status: attendeeStats?.status || record.status || 'absent',
+      status: attendeeStats?.status || record.status || 'low present',
+      attendancePercentage: attendeeStats?.attendancePercentage ?? 0,
       occurrenceDurationMinutes: analytics?.occurrenceDurationMinutes ?? 0,
-      thresholdMinutes: analytics?.thresholdMinutes ?? 0
+      thresholdMinutes: analytics?.thresholdMinutes ?? 0,
+      partialThresholdMinutes: analytics?.partialThresholdMinutes ?? 0
     };
   });
 
@@ -714,6 +753,66 @@ async function buildAttendanceSnapshot(query = {}) {
   };
 }
 
+async function loadSessionAttendanceData(sessionId, query = {}) {
+  const attendanceDate = normalizeText(query.attendanceDate);
+  const window = resolveWindow(query);
+  const attendanceMatch = buildAttendanceMatch({ ...query, sessionId }, window);
+  const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch batches className courses mentorName status').lean();
+  const [rawRecords, activeSessions] = await Promise.all([
+    AttendanceRecord.find(attendanceMatch)
+      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
+      .sort({ attendedAt: 1 })
+      .lean(),
+    ActiveSession.find({ status: 'active', classSessionId: sessionId })
+      .select('lmsId classSessionId joinedAt lastSeenAt status')
+      .lean()
+  ]);
+  const activeSessionsByLmsId = new Map(activeSessions.map((activeSession) => [activeSession.lmsId, activeSession]));
+  const allRecords = rawRecords.map((record) => {
+    const liveRecord = mergeRecordWithActiveSession(record, activeSessionsByLmsId.get(record.lmsId));
+    return reviveLikelyAutoFinalizedRecord(liveRecord, session || { status: 'off' });
+  });
+  const occurrenceAnalytics = buildOccurrenceAnalytics(allRecords);
+  const occurrenceKey = buildOccurrenceKey(sessionId, attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || '');
+  const occurrenceInfo = occurrenceAnalytics.get(occurrenceKey);
+  const records = allRecords.map((record) => {
+    const recordAttendanceDate = resolveAttendanceDate(record);
+    const recordOccurrenceKey = buildOccurrenceKey(record.sessionId, recordAttendanceDate);
+    const analytics = occurrenceAnalytics.get(recordOccurrenceKey);
+    const attendeeStats = analytics?.attendeeStats?.get(record.lmsId);
+
+    return {
+      lmsId: record.lmsId,
+      studentName: record.studentName,
+      mobile: record.mobile || '',
+      mentorName: record.mentorName || '',
+      className: record.className || '',
+      attendedAt: record.attendedAt,
+      attendanceDate: recordAttendanceDate || null,
+      status: attendeeStats?.status || record.status || 'low present',
+      durationMinutes: attendeeStats?.durationMinutes ?? resolveDurationMinutes(record),
+      attendancePercentage: attendeeStats?.attendancePercentage ?? 0
+    };
+  });
+
+  return {
+    session: {
+      sessionId,
+      sessionName: session?.title || allRecords[0]?.sessionName || sessionId,
+      occurrenceKey,
+      batch: formatSessionBatch(session) || allRecords[0]?.batch || '',
+      course: Array.isArray(session?.courses) ? session.courses.join(', ') : (allRecords[0]?.course || ''),
+      mentorName: session?.mentorName || allRecords[0]?.mentorName || '',
+      className: session?.className || allRecords[0]?.className || '',
+      attendanceDate: attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || null,
+      occurrenceDurationMinutes: occurrenceInfo?.occurrenceDurationMinutes ?? 0,
+      thresholdMinutes: occurrenceInfo?.thresholdMinutes ?? 0,
+      partialThresholdMinutes: occurrenceInfo?.partialThresholdMinutes ?? 0
+    },
+    records
+  };
+}
+
 function toCsvRows(records) {
   const headers = ['LMS ID', 'Name', 'Mobile', 'Batch', 'Course', 'Session', 'Mentor', 'Attendance Date', 'Status', 'Attendance Percentage', 'Last Attendance Date'];
   const lines = [headers.map(buildCsvValue).join(',')];
@@ -830,81 +929,74 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
     }
 
     const sessionId = normalizeText(req.params.sessionId);
-    const attendanceDate = normalizeText(req.query.attendanceDate);
     if (!sessionId) {
       return res.status(400).json({ success: false, message: 'Session ID is required' });
     }
 
-    const window = resolveWindow(req.query);
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
-    const attendanceMatch = buildAttendanceMatch({ ...req.query, sessionId }, window);
-    const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch batches className courses mentorName status').lean();
-    const [rawRecords, activeSessions] = await Promise.all([
-      AttendanceRecord.find(attendanceMatch)
-        .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
-        .sort({ attendedAt: 1 })
-        .lean(),
-      ActiveSession.find({ status: 'active', classSessionId: sessionId })
-        .select('lmsId classSessionId joinedAt lastSeenAt status')
-        .lean()
-    ]);
-    const activeSessionsByLmsId = new Map(activeSessions.map((session) => [session.lmsId, session]));
-    const allRecords = rawRecords.map((record) => {
-      const liveRecord = mergeRecordWithActiveSession(record, activeSessionsByLmsId.get(record.lmsId));
-      return reviveLikelyAutoFinalizedRecord(liveRecord, session || { status: 'off' });
-    });
-    const occurrenceAnalytics = buildOccurrenceAnalytics(allRecords);
-    const occurrenceKey = buildOccurrenceKey(sessionId, attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || '');
-    const occurrenceInfo = occurrenceAnalytics.get(occurrenceKey);
-
-    const total = allRecords.length;
+    const sessionAttendance = await loadSessionAttendanceData(sessionId, req.query);
+    const total = sessionAttendance.records.length;
     const totalPages = Math.max(Math.ceil(total / limit), 1);
     const safePage = Math.min(page, totalPages);
-    const records = allRecords.slice((safePage - 1) * limit, safePage * limit);
+    const records = sessionAttendance.records.slice((safePage - 1) * limit, safePage * limit);
 
     return res.status(200).json({
       success: true,
       message: 'Session attendance retrieved successfully',
-      session: {
-        sessionId,
-        sessionName: session?.title || allRecords[0]?.sessionName || sessionId,
-        occurrenceKey,
-        batch: formatSessionBatch(session) || allRecords[0]?.batch || '',
-        course: Array.isArray(session?.courses) ? session.courses.join(', ') : (allRecords[0]?.course || ''),
-        mentorName: session?.mentorName || allRecords[0]?.mentorName || '',
-        className: session?.className || allRecords[0]?.className || '',
-        attendanceDate: attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || null,
-        occurrenceDurationMinutes: occurrenceInfo?.occurrenceDurationMinutes ?? 0,
-        thresholdMinutes: occurrenceInfo?.thresholdMinutes ?? 0
-      },
+      session: sessionAttendance.session,
       pagination: {
         page: safePage,
         limit,
         total,
         totalPages
       },
-      records: records.map((record) => {
-        const recordAttendanceDate = resolveAttendanceDate(record);
-        const recordOccurrenceKey = buildOccurrenceKey(record.sessionId, recordAttendanceDate);
-        const analytics = occurrenceAnalytics.get(recordOccurrenceKey);
-        const attendeeStats = analytics?.attendeeStats?.get(record.lmsId);
-
-        return {
-        lmsId: record.lmsId,
-        studentName: record.studentName,
-        mobile: record.mobile || '',
-        mentorName: record.mentorName || '',
-        className: record.className || '',
-        attendedAt: record.attendedAt,
-        attendanceDate: recordAttendanceDate || null,
-        status: attendeeStats?.status || record.status || 'absent',
-        durationMinutes: attendeeStats?.durationMinutes ?? resolveDurationMinutes(record)
-        };
-      })
+      records
     });
   } catch (error) {
     console.error('Error loading session attendance:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/session/:sessionId/export', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const sessionId = normalizeText(req.params.sessionId);
+    if (!sessionId) {
+      return res.status(400).json({ success: false, message: 'Session ID is required' });
+    }
+
+    const sessionAttendance = await loadSessionAttendanceData(sessionId, req.query);
+    const XLSX = require('xlsx');
+    const workbook = XLSX.utils.book_new();
+    const sheetRows = sessionAttendance.records.map((record) => ({
+      'LMS ID': record.lmsId,
+      Name: record.studentName || '',
+      Mobile: record.mobile || '',
+      Mentor: record.mentorName || sessionAttendance.session.mentorName || '',
+      'Joined At': record.attendedAt ? new Date(record.attendedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '',
+      'Attendance Date': record.attendanceDate || '',
+      'Duration (Minutes)': Math.round(Number(record.durationMinutes || 0) * 10) / 10,
+      'Attendance %': Math.round(Number(record.attendancePercentage || 0) * 10) / 10,
+      Status: record.status
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(sheetRows);
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      sanitizeSheetName(`${sessionAttendance.session.sessionName || sessionId} ${sessionAttendance.session.attendanceDate || ''}`.trim(), 'Attendance')
+    );
+    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
+    const fileName = sanitizeFileName(`${sessionAttendance.session.sessionName || sessionId}-${sessionAttendance.session.attendanceDate || 'attendance'}`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}.xlsx"`);
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error('Error exporting session attendance:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
