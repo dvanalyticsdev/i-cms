@@ -70,6 +70,9 @@ const initializeDatabase = async () => {
       const cursor = studentCollection.find({ course: { $type: 'string' } });
       let migratedCount = 0;
       for await (const student of cursor) {
+        if (typeof student.course !== 'string') {
+          continue;
+        }
         const courseName = student.course || '';
         const coursesArray = courseName.split(',').map(c => c.trim()).filter(Boolean);
         await studentCollection.updateOne(
