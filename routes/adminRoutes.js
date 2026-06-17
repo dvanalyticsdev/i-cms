@@ -1277,10 +1277,16 @@ router.post('/students', authMiddleware, async (req, res) => {
     const { lmsId, name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
     const normalizedBatch = normalizeText(batch);
-    const normalizedCourse = normalizeText(course);
 
-    if (!sanitizedLmsId || !name || !normalizedBatch || !normalizedCourse) {
-      return res.status(400).json({ success: false, message: 'LMS ID, Name, Batch, and Course are required' });
+    let coursesArray = [];
+    if (Array.isArray(course)) {
+      coursesArray = course.map(c => normalizeText(c)).filter(Boolean);
+    } else if (typeof course === 'string') {
+      coursesArray = course.split(',').map(c => normalizeText(c)).filter(Boolean);
+    }
+
+    if (!sanitizedLmsId || !name || !normalizedBatch || coursesArray.length === 0) {
+      return res.status(400).json({ success: false, message: 'LMS ID, Name, Batch, and at least one Course are required' });
     }
 
     const duplicateLmsId = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
@@ -1294,7 +1300,7 @@ router.post('/students', authMiddleware, async (req, res) => {
       mobile: normalizeText(mobile).replace(/\D/g, ''),
       emailId: normalizeText(emailId).toLowerCase(),
       batch: normalizedBatch,
-      course: normalizedCourse,
+      course: coursesArray,
       year: normalizeText(year),
       paymentStatus: normalizePaymentStatus(paymentStatus),
       feeStatusException: normalizeFeeStatusException(feeStatusException)
@@ -1319,10 +1325,16 @@ router.put('/students/:lmsId', authMiddleware, async (req, res) => {
     const { name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
     const normalizedBatch = normalizeText(batch);
-    const normalizedCourse = normalizeText(course);
 
-    if (!name || !normalizedBatch || !normalizedCourse) {
-      return res.status(400).json({ success: false, message: 'Name, Batch, and Course are required' });
+    let coursesArray = [];
+    if (Array.isArray(course)) {
+      coursesArray = course.map(c => normalizeText(c)).filter(Boolean);
+    } else if (typeof course === 'string') {
+      coursesArray = course.split(',').map(c => normalizeText(c)).filter(Boolean);
+    }
+
+    if (!name || !normalizedBatch || coursesArray.length === 0) {
+      return res.status(400).json({ success: false, message: 'Name, Batch, and at least one Course are required' });
     }
 
     const existingStudent = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
@@ -1337,7 +1349,7 @@ router.put('/students/:lmsId', authMiddleware, async (req, res) => {
         mobile: normalizeText(mobile).replace(/\D/g, ''),
         emailId: normalizeText(emailId).toLowerCase(),
         batch: normalizedBatch,
-        course: normalizedCourse,
+        course: coursesArray,
         year: normalizeText(year),
         paymentStatus: normalizePaymentStatus(paymentStatus),
         feeStatusException: normalizeFeeStatusException(feeStatusException)

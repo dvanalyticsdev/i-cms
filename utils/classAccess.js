@@ -52,18 +52,25 @@ function isClassAccessible({ student, className, ruleMap }) {
     return false;
   }
 
-  const course = normalizeText(student.course);
+  const studentCourses = Array.isArray(student.course)
+    ? student.course
+    : (student.course ? [student.course] : []);
+
   const paymentStatus = getEffectivePaymentStatus(student);
-  const directRule = ruleMap.get(buildRuleKey(course, paymentStatus));
-  const fallbackRule = ruleMap.get(buildRuleKey(course, DEFAULT_PAYMENT_STATUS));
-  const rule = directRule || fallbackRule;
 
-  if (!rule) {
-    return false;
-  }
+  return studentCourses.some((courseName) => {
+    const course = normalizeText(courseName);
+    const directRule = ruleMap.get(buildRuleKey(course, paymentStatus));
+    const fallbackRule = ruleMap.get(buildRuleKey(course, DEFAULT_PAYMENT_STATUS));
+    const rule = directRule || fallbackRule;
 
-  const accessMap = rule.accessMap instanceof Map ? Object.fromEntries(rule.accessMap.entries()) : (rule.accessMap || {});
-  return Boolean(accessMap[className]);
+    if (!rule) {
+      return false;
+    }
+
+    const accessMap = rule.accessMap instanceof Map ? Object.fromEntries(rule.accessMap.entries()) : (rule.accessMap || {});
+    return Boolean(accessMap[className]);
+  });
 }
 
 module.exports = {

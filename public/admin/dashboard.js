@@ -457,7 +457,7 @@ async function loadCourses() {
             renderCourseManagement();
             renderCoursesCheckboxes();
             populateSessionClassOptions();
-            populateStudentCourseSelect();
+            renderStudentCoursesCheckboxes();
             populateStudentCourseFilter();
             populateAttendanceFilterOptions();
         }
@@ -517,20 +517,35 @@ function populateSessionClassOptions() {
     select.value = currentValue;
 }
 
-function populateStudentCourseSelect(selectedCourse = '') {
-    const select = document.getElementById('studentCourse');
-    if (!select) {
+function renderStudentCoursesCheckboxes(selectedCourses = []) {
+    const container = document.getElementById('studentCoursesContainer');
+    if (!container) {
         return;
     }
 
-    select.innerHTML = '<option value="">Select a course</option>';
-    availableCourses.forEach(course => {
-        const option = document.createElement('option');
-        option.value = course;
-        option.textContent = course;
-        option.selected = selectedCourse === course;
-        select.appendChild(option);
-    });
+    if (availableCourses.length === 0) {
+        container.innerHTML = '<p style="color: #999; font-size: 12px;">No courses available</p>';
+        return;
+    }
+
+    const selectedList = Array.isArray(selectedCourses)
+        ? selectedCourses
+        : (typeof selectedCourses === 'string' ? selectedCourses.split(',').map(c => c.trim()).filter(Boolean) : []);
+
+    const checkboxesHtml = availableCourses.map(course => `
+        <label class="course-checkbox" style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; cursor: pointer;">
+            <input 
+                type="checkbox" 
+                name="studentCourse" 
+                value="${escapeHtml(course)}"
+                ${selectedList.includes(course) ? 'checked' : ''}
+                style="cursor: pointer;"
+            >
+            <span>${escapeHtml(course)}</span>
+        </label>
+    `).join('');
+
+    container.innerHTML = `<div class="selection-list" style="display: flex; flex-direction: column; gap: 4px; padding: 8px; max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background-color: var(--surface-muted, #f8f9fa);">${checkboxesHtml}</div>`;
 }
 
 /**
@@ -2513,7 +2528,7 @@ function renderStudents() {
             <td>${escapeHtml(student.emailId || '-')}</td>
             <td>${escapeHtml(student.batch || '-')}</td>
             <td>${escapeHtml(student.year || '-')}</td>
-            <td>${escapeHtml(student.course || '-')}</td>
+            <td>${escapeHtml(Array.isArray(student.course) ? student.course.join(', ') : (student.course || '-'))}</td>
             <td>${escapeHtml(student.paymentStatus || 'DEFAULT')}</td>
             <td>${student.feeStatusException ? 'Yes' : 'No'}</td>
             <td>
@@ -2605,7 +2620,7 @@ function openAddStudentModal() {
     document.getElementById('studentModalTitle').textContent = 'Add New Student';
     document.getElementById('studentSubmitText').textContent = 'Add Student';
     document.getElementById('studentLmsId').disabled = false;
-    populateStudentCourseSelect();
+    renderStudentCoursesCheckboxes([]);
     
     document.getElementById('studentModal').classList.remove('hidden');
 }
@@ -2630,7 +2645,7 @@ function openEditStudentModal(lmsId) {
     document.getElementById('studentModalTitle').textContent = 'Edit Student';
     document.getElementById('studentSubmitText').textContent = 'Save Changes';
     document.getElementById('studentLmsId').disabled = true;  // Cannot change LMS ID
-    populateStudentCourseSelect(student.course || '');
+    renderStudentCoursesCheckboxes(student.course || []);
     
     document.getElementById('studentModal').classList.remove('hidden');
 }
@@ -2655,12 +2670,15 @@ async function handleSaveStudent(event) {
     const name = document.getElementById('studentName').value.trim();
     const emailId = document.getElementById('studentEmailId').value.trim();
     const year = document.getElementById('studentYear').value.trim();
-    const course = document.getElementById('studentCourse').value.trim();
+    
+    const checkboxes = document.querySelectorAll('input[name="studentCourse"]:checked');
+    const courses = Array.from(checkboxes).map(cb => cb.value);
+    
     const paymentStatus = document.getElementById('studentPaymentStatus').value;
     const feeStatusException = document.getElementById('studentFeeStatusException').value === 'true';
 
-    if (!lmsId || !batch || !name || !course) {
-        showToast('Please fill in LMS ID, Name, Batch, and Course', 'error');
+    if (!lmsId || !batch || !name || courses.length === 0) {
+        showToast('Please fill in LMS ID, Name, Batch, and select at least one Course', 'error');
         return;
     }
 
@@ -2674,7 +2692,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException })
+                body: JSON.stringify({ name, mobile, emailId, batch, course: courses, year, paymentStatus, feeStatusException })
             });
         } else {
             // Add new student
@@ -2684,7 +2702,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ lmsId, name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException })
+                body: JSON.stringify({ lmsId, name, mobile, emailId, batch, course: courses, year, paymentStatus, feeStatusException })
             });
         }
 

@@ -23,11 +23,11 @@ function readStudentWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH) {
     name: normalizeText(row['STUDENT NAME']),
     mobile: normalizeMobile(row.MOBILE),
     emailId: normalizeText(row['EMAIL ID']).toLowerCase(),
-    course: normalizeText(row.Course),
+    course: normalizeText(row.Course).split(',').map((c) => c.trim()).filter(Boolean),
     batch: normalizeText(row.BATCH),
     year: normalizeText(row.YEAR),
     paymentStatus: normalizePaymentStatus(row['PAYMENT STATUS'])
-  })).filter((row) => row.lmsId && row.name && row.course && row.batch);
+  })).filter((row) => row.lmsId && row.name && row.course.length > 0 && row.batch);
 }
 
 function findStudentInWorkbook(lmsId, filePath = DEFAULT_STUDENT_WORKBOOK_PATH) {
@@ -114,7 +114,7 @@ async function syncStudentsFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH
 
 async function syncCoursesFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH) {
   const students = readStudentWorkbook(filePath);
-  const courseNames = Array.from(new Set(students.map((student) => student.course).filter(Boolean))).sort();
+  const courseNames = Array.from(new Set(students.flatMap((student) => student.course).filter(Boolean))).sort();
 
   if (courseNames.length > 0) {
     await Course.bulkWrite(

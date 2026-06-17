@@ -33,9 +33,14 @@ const studentSchema = new mongoose.Schema(
       index: true
     },
     course: {
-      type: String,
+      type: [String],
       required: true,
-      trim: true,
+      validate: {
+        validator: function(v) {
+          return Array.isArray(v) && v.length > 0;
+        },
+        message: 'A student must be enrolled in at least one course'
+      },
       index: true
     },
     year: {

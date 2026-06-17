@@ -64,6 +64,27 @@ const initializeDatabase = async () => {
       // ignore legacy phone index cleanup issues on fresh databases
     }
 
+    // Migrate student course field from String to [String]
+    try {
+      const studentCollection = mongoose.connection.collection('students');
+      const cursor = studentCollection.find({ course: { $type: 'string' } });
+      let migratedCount = 0;
+      for await (const student of cursor) {
+        const courseName = student.course || '';
+        const coursesArray = courseName.split(',').map(c => c.trim()).filter(Boolean);
+        await studentCollection.updateOne(
+          { _id: student._id },
+          { $set: { course: coursesArray } }
+        );
+        migratedCount++;
+      }
+      if (migratedCount > 0) {
+        console.log(`✓ Migrated ${migratedCount} student(s) to multiple course arrays`);
+      }
+    } catch (err) {
+      console.error('Error migrating student course fields:', err.message);
+    }
+
     // Start background finalizer to run every 1 minute.
     // The timeout inside autoFinalizeStaleSessions is intentionally long so
     // an in-progress Zoom session is not ended after a brief heartbeat gap.

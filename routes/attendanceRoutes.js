@@ -516,12 +516,14 @@ async function buildAttendanceSnapshot(query = {}) {
         .filter((record) => record.status === 'present')
         .map((record) => record.occurrenceKey || buildOccurrenceKey(record.sessionId, resolveAttendanceDate(record)))
     ).size;
-    const courseKey = normalizeText(student.course) || 'Unassigned';
-
-    if (!courseGroups.has(courseKey)) courseGroups.set(courseKey, { totalStudents: 0, presentSessions: 0 });
-
-    courseGroups.get(courseKey).totalStudents += 1;
-    courseGroups.get(courseKey).presentSessions += presentSessions;
+    const studentCourses = Array.isArray(student.course) ? student.course : (student.course ? [student.course] : []);
+    const coursesToProcess = studentCourses.length > 0 ? studentCourses : ['Unassigned'];
+    coursesToProcess.forEach(courseName => {
+      const courseKey = normalizeText(courseName) || 'Unassigned';
+      if (!courseGroups.has(courseKey)) courseGroups.set(courseKey, { totalStudents: 0, presentSessions: 0 });
+      courseGroups.get(courseKey).totalStudents += 1;
+      courseGroups.get(courseKey).presentSessions += presentSessions;
+    });
   });
 
   const atRiskThreshold = Math.max(Number(query.threshold || 75), 1);
@@ -554,7 +556,7 @@ async function buildAttendanceSnapshot(query = {}) {
         lmsId: student.lmsId,
         name: student.name,
         batch: student.batch || 'Unassigned',
-        course: student.course || 'Unassigned',
+        course: Array.isArray(student.course) ? student.course.join(', ') : (student.course || 'Unassigned'),
         mobile: student.mobile || '',
         attendancePercentage,
         missedSessions,
@@ -583,7 +585,7 @@ async function buildAttendanceSnapshot(query = {}) {
       name: student.name,
       mobile: student.mobile || '',
       batch: student.batch || 'Unassigned',
-      course: student.course || 'Unassigned',
+      course: Array.isArray(student.course) ? student.course.join(', ') : (student.course || 'Unassigned'),
       attendancePercentage,
       presentSessions,
       absentSessions: Math.max(sessionsConducted - presentSessions, 0),
