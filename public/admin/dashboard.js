@@ -163,6 +163,48 @@ function buildAttendanceOccurrenceKey(sessionId, attendanceDate) {
     return `${String(sessionId || '').trim()}__${String(attendanceDate || '').trim()}`;
 }
 
+function syncAttendanceWindowInputs(session) {
+    const panel = document.getElementById('attendanceWindowPanel');
+    const startInput = document.getElementById('attendanceClassStartTime');
+    const endInput = document.getElementById('attendanceClassEndTime');
+    const saveButton = document.getElementById('saveAttendanceWindowButton');
+    const resetButton = document.getElementById('resetAttendanceWindowButton');
+    if (!panel || !startInput || !endInput || !saveButton || !resetButton) {
+        return;
+    }
+
+    const hasSession = Boolean(session?.sessionId && session?.attendanceDate);
+    panel.classList.toggle('hidden', !hasSession);
+
+    if (!hasSession) {
+        startInput.value = '';
+        endInput.value = '';
+        saveButton.disabled = true;
+        resetButton.disabled = true;
+        return;
+    }
+
+    startInput.value = session.classStartTime || '';
+    endInput.value = session.classEndTime || '';
+    saveButton.disabled = false;
+    resetButton.disabled = !session.windowOverrideApplied;
+}
+
+function setAttendanceWindowBusy(isBusy) {
+    const saveButton = document.getElementById('saveAttendanceWindowButton');
+    const resetButton = document.getElementById('resetAttendanceWindowButton');
+    if (!isBusy) {
+        syncAttendanceWindowInputs(attendanceInsightsState.selectedSession || null);
+        return;
+    }
+    if (saveButton) {
+        saveButton.disabled = isBusy;
+    }
+    if (resetButton) {
+        resetButton.disabled = isBusy;
+    }
+}
+
 function isAllowedPosterFile(file) {
     if (!file) {
         return false;
@@ -3400,6 +3442,111 @@ async function exportSelectedAttendanceOccurrence() {
     }
 }
 
+async function saveSelectedAttendanceWindow() {
+    const session = attendanceInsightsState.selectedSession;
+    const sessionId = session?.sessionId || '';
+    const attendanceDate = session?.attendanceDate || '';
+    const startInput = document.getElementById('attendanceClassStartTime');
+    const endInput = document.getElementById('attendanceClassEndTime');
+    const classStartTime = startInput?.value || '';
+    const classEndTime = endInput?.value || '';
+
+    if (!sessionId || !attendanceDate) {
+        showToast('Select a dated session occurrence first', 'error');
+        return;
+    }
+
+    if (!classStartTime || !classEndTime) {
+        showToast('Enter both class start and end time', 'error');
+        return;
+    }
+
+    setAttendanceWindowBusy(true);
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/attendance/session/${encodeURIComponent(sessionId)}/window`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                attendanceDate,
+                classStartTime,
+                classEndTime
+            })
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to update attendance timing');
+        }
+
+        showToast(data.message || 'Attendance timing updated successfully', 'success');
+        await viewAttendance(sessionId, false, attendanceInsightsState.detailPagination?.page || 1, attendanceDate);
+        await loadAttendanceInsights(attendanceInsightsState.pagination?.page || 1);
+        await loadAttendanceRoster(attendanceInsightsState.rosterPagination?.page || 1);
+    } catch (error) {
+        console.error('Error updating attendance timing:', error);
+        showToast(error.message || 'Failed to update attendance timing', 'error');
+    } finally {
+        setAttendanceWindowBusy(false);
+    }
+}
+
+async function resetSelectedAttendanceWindow() {
+    const session = attendanceInsightsState.selectedSession;
+    const sessionId = session?.sessionId || '';
+    const attendanceDate = session?.attendanceDate || '';
+
+    if (!sessionId || !attendanceDate) {
+        showToast('Select a dated session occurrence first', 'error');
+        return;
+    }
+
+    const confirmed = confirm(`Reset attendance timing for "${session.sessionName || sessionId}" on ${attendanceDate}?`);
+    if (!confirmed) {
+        return;
+    }
+
+    setAttendanceWindowBusy(true);
+
+    try {
+        const params = new URLSearchParams({ attendanceDate });
+        const response = await fetch(`${API_BASE_URL}/attendance/session/${encodeURIComponent(sessionId)}/window?${params.toString()}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to reset attendance timing');
+        }
+
+        showToast(data.message || 'Attendance timing reset successfully', 'success');
+        await viewAttendance(sessionId, false, attendanceInsightsState.detailPagination?.page || 1, attendanceDate);
+        await loadAttendanceInsights(attendanceInsightsState.pagination?.page || 1);
+        await loadAttendanceRoster(attendanceInsightsState.rosterPagination?.page || 1);
+    } catch (error) {
+        console.error('Error resetting attendance timing:', error);
+        showToast(error.message || 'Failed to reset attendance timing', 'error');
+    } finally {
+        setAttendanceWindowBusy(false);
+    }
+}
+
 function renderAttendanceDetailTable() {
     const detailMeta = document.getElementById('attendanceDetailMeta');
     const detailList = document.getElementById('attendanceDetailList');
@@ -3413,6 +3560,7 @@ function renderAttendanceDetailTable() {
     const pagination = attendanceInsightsState.detailPagination || { page: 1, limit: 30, total: records.length, totalPages: 1 };
 
     if (!session) {
+        syncAttendanceWindowInputs(null);
         detailMeta.textContent = 'Choose a session to view attendance.';
         detailList.innerHTML = `
             <tr>
@@ -3437,14 +3585,18 @@ function renderAttendanceDetailTable() {
     if (exportButton) {
         exportButton.classList.toggle('hidden', !session.attendanceDate);
     }
+    syncAttendanceWindowInputs(session);
 
     const start = pagination.total === 0 ? 0 : ((pagination.page - 1) * pagination.limit) + 1;
     const end = pagination.total === 0 ? 0 : Math.min(start + records.length - 1, pagination.total);
     const attendanceDateLabel = session.attendanceDate ? ` • ${escapeHtml(session.attendanceDate)}` : '';
+    const windowLabel = session.classStartTime && session.classEndTime
+        ? ` • Class window ${escapeHtml(session.classStartTime)}-${escapeHtml(session.classEndTime)}${session.windowOverrideApplied ? ' (manual)' : ' (inferred)'}`
+        : '';
     const thresholdLabel = session.thresholdMinutes > 0
         ? ` • Present if >= ${escapeHtml(formatDuration(session.thresholdMinutes))} • Partial if >= ${escapeHtml(formatDuration(session.partialThresholdMinutes || 0))}`
         : ' • Present if >= 80% • Partial if >= 30% • Low present below 30%';
-    detailMeta.textContent = `${session.sessionName || session.sessionId}${attendanceDateLabel} • ${pagination.total || 0} student(s) joined${thresholdLabel}${pagination.total > pagination.limit ? ` • Showing ${start}-${end}` : ''}`;
+    detailMeta.textContent = `${session.sessionName || session.sessionId}${attendanceDateLabel}${windowLabel} • ${pagination.total || 0} student(s) joined${thresholdLabel}${pagination.total > pagination.limit ? ` • Showing ${start}-${end}` : ''}`;
 
     if (records.length === 0) {
         detailList.innerHTML = `

@@ -4,6 +4,7 @@ const authMiddleware = require('../middleware/authMiddleware');
 const Student = require('../models/Student');
 const ClassSession = require('../models/ClassSession');
 const AttendanceRecord = require('../models/AttendanceRecord');
+const AttendanceWindowOverride = require('../models/AttendanceWindowOverride');
 const ActiveSession = require('../models/ActiveSession');
 const { logSessionActivity } = require('../utils/sessionLogger');
 
@@ -180,6 +181,59 @@ function buildOccurrenceKey(sessionId, attendanceDate) {
   return `${normalizeText(sessionId)}__${normalizeText(attendanceDate || 'undated')}`;
 }
 
+function formatTimeValue(value) {
+  const date = toValidDate(value);
+  if (!date) return '';
+
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(date);
+}
+
+function parseAttendanceWindowDateTime(attendanceDate, timeValue) {
+  const normalizedDate = normalizeText(attendanceDate);
+  const normalizedTime = normalizeText(timeValue);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate) || !/^\d{2}:\d{2}$/.test(normalizedTime)) {
+    return null;
+  }
+
+  const parsed = new Date(`${normalizedDate}T${normalizedTime}:00+05:30`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getDurationOverlapMinutes(rangeStart, rangeEnd, windowStart, windowEnd) {
+  const startedAt = toValidDate(rangeStart);
+  const endedAt = toValidDate(rangeEnd);
+  const effectiveWindowStart = toValidDate(windowStart);
+  const effectiveWindowEnd = toValidDate(windowEnd);
+
+  if (!startedAt || !endedAt || !effectiveWindowStart || !effectiveWindowEnd) {
+    return 0;
+  }
+
+  const overlapStart = Math.max(startedAt.getTime(), effectiveWindowStart.getTime());
+  const overlapEnd = Math.min(endedAt.getTime(), effectiveWindowEnd.getTime());
+  if (overlapEnd <= overlapStart) {
+    return 0;
+  }
+
+  return Math.round((((overlapEnd - overlapStart) / 60000)) * 10) / 10;
+}
+
+function buildOccurrenceOverrideMap(overrides = []) {
+  return new Map(
+    overrides
+      .filter((overrideRecord) => overrideRecord?.sessionId && overrideRecord?.attendanceDate)
+      .map((overrideRecord) => [
+        buildOccurrenceKey(overrideRecord.sessionId, overrideRecord.attendanceDate),
+        overrideRecord
+      ])
+  );
+}
+
 function resolveAttendanceStatus(durationMinutes, occurrenceDurationMinutes) {
   const safeDurationMinutes = Math.max(Number(durationMinutes || 0), 0);
   const safeOccurrenceDurationMinutes = Math.max(Number(occurrenceDurationMinutes || 0), 0);
@@ -280,7 +334,7 @@ function mergeRecordWithActiveSession(record, activeSession) {
   };
 }
 
-function buildOccurrenceAnalytics(records = []) {
+function buildOccurrenceAnalytics(records = [], overrideMap = new Map()) {
   const recordsByOccurrence = new Map();
 
   records.forEach((record) => {
@@ -306,15 +360,38 @@ function buildOccurrenceAnalytics(records = []) {
       .map(resolveRecordEndedAt)
       .filter(Boolean)
       .sort((left, right) => right.getTime() - left.getTime());
-    const occurrenceDurationMinutes = startTimes.length > 0 && endTimes.length > 0
-      ? Math.max((endTimes[0].getTime() - startTimes[0].getTime()) / 60000, 0)
+    const inferredStartedAt = startTimes[0] || null;
+    const inferredEndedAt = endTimes[0] || null;
+    const overrideRecord = overrideMap.get(occurrenceKey);
+    const overrideStartedAt = toValidDate(overrideRecord?.classStartAt);
+    const overrideEndedAt = toValidDate(overrideRecord?.classEndAt);
+    const overrideApplied = Boolean(
+      overrideStartedAt
+      && overrideEndedAt
+      && overrideEndedAt.getTime() > overrideStartedAt.getTime()
+    );
+    const effectiveStartedAt = overrideApplied ? overrideStartedAt : inferredStartedAt;
+    const effectiveEndedAt = overrideApplied ? overrideEndedAt : inferredEndedAt;
+    const occurrenceDurationMinutes = effectiveStartedAt && effectiveEndedAt
+      ? Math.max((effectiveEndedAt.getTime() - effectiveStartedAt.getTime()) / 60000, 0)
       : 0;
     const thresholdMinutes = occurrenceDurationMinutes * PRESENT_ATTENDANCE_THRESHOLD;
     const partialThresholdMinutes = occurrenceDurationMinutes * PARTIAL_ATTENDANCE_THRESHOLD;
     const attendeeStats = new Map();
 
     occurrenceRecords.forEach((record) => {
-      const durationMinutes = resolveDurationMinutes(record);
+      const rawDurationMinutes = resolveDurationMinutes(record);
+      const recordStartedAt = resolveRecordStartedAt(record);
+      const recordEndedAt = resolveRecordEndedAt(record);
+      let durationMinutes = rawDurationMinutes;
+
+      if (overrideApplied && recordStartedAt && recordEndedAt) {
+        durationMinutes = Math.min(
+          rawDurationMinutes,
+          getDurationOverlapMinutes(recordStartedAt, recordEndedAt, effectiveStartedAt, effectiveEndedAt)
+        );
+      }
+
       const attendance = resolveAttendanceStatus(durationMinutes, occurrenceDurationMinutes);
 
       attendeeStats.set(record.lmsId, {
@@ -328,6 +405,13 @@ function buildOccurrenceAnalytics(records = []) {
       occurrenceDurationMinutes: Math.round(occurrenceDurationMinutes * 10) / 10,
       thresholdMinutes: Math.round(thresholdMinutes * 10) / 10,
       partialThresholdMinutes: Math.round(partialThresholdMinutes * 10) / 10,
+      occurrenceStartedAt: effectiveStartedAt,
+      occurrenceEndedAt: effectiveEndedAt,
+      inferredStartedAt,
+      inferredEndedAt,
+      overrideApplied,
+      overrideStartAt: overrideStartedAt,
+      overrideEndAt: overrideEndedAt,
       attendeeStats,
       presentStudentIds: new Set(
         Array.from(attendeeStats.entries())
@@ -400,6 +484,20 @@ async function buildAttendanceSnapshot(query = {}) {
   const relevantAttendanceRecords = attendanceRecords
     .filter((record) => relevantSessionIds.has(record.sessionId))
     .map((record) => mergeRecordWithActiveSession(record, activeSessionsByKey.get(`${record.lmsId}__${record.sessionId}`)));
+  const relevantAttendanceDates = Array.from(new Set(
+    relevantAttendanceRecords
+      .map((record) => resolveAttendanceDate(record))
+      .filter(Boolean)
+  ));
+  const relevantOverrides = relevantAttendanceDates.length > 0 && relevantSessionIds.size > 0
+    ? await AttendanceWindowOverride.find({
+      sessionId: { $in: Array.from(relevantSessionIds) },
+      attendanceDate: { $in: relevantAttendanceDates }
+    })
+      .select('sessionId attendanceDate classStartAt classEndAt updatedBy updatedAt createdAt')
+      .lean()
+    : [];
+  const overrideMap = buildOccurrenceOverrideMap(relevantOverrides);
 
   const occurrenceMap = new Map();
   relevantAttendanceRecords.forEach((record) => {
@@ -472,7 +570,7 @@ async function buildAttendanceSnapshot(query = {}) {
     const attendanceDate = resolveAttendanceDate(record);
     return attendanceDate && relevantOccurrenceKeys.has(buildOccurrenceKey(record.sessionId, attendanceDate));
   });
-  const occurrenceAnalytics = buildOccurrenceAnalytics(filteredAttendanceRecords);
+  const occurrenceAnalytics = buildOccurrenceAnalytics(filteredAttendanceRecords, overrideMap);
   const enrichedAttendanceRecords = filteredAttendanceRecords.map((record) => {
     const attendanceDate = resolveAttendanceDate(record);
     const occurrenceKey = buildOccurrenceKey(record.sessionId, attendanceDate);
@@ -621,7 +719,13 @@ async function buildAttendanceSnapshot(query = {}) {
         attendancePercentage: getAttendanceRate(presentStudents, Math.max(students.length, 1)),
         attendanceDate: occurrence.attendanceDate || '',
         occurrenceDurationMinutes: analytics?.occurrenceDurationMinutes ?? 0,
-        thresholdMinutes: analytics?.thresholdMinutes ?? 0
+        thresholdMinutes: analytics?.thresholdMinutes ?? 0,
+        partialThresholdMinutes: analytics?.partialThresholdMinutes ?? 0,
+        classStartAt: analytics?.occurrenceStartedAt || null,
+        classEndAt: analytics?.occurrenceEndedAt || null,
+        configuredStartAt: analytics?.overrideStartAt || null,
+        configuredEndAt: analytics?.overrideEndAt || null,
+        overrideApplied: analytics?.overrideApplied || false
       };
     });
 
@@ -724,19 +828,26 @@ async function loadSessionAttendanceData(sessionId, query = {}) {
   const window = resolveWindow(query);
   const attendanceMatch = buildAttendanceMatch({ ...query, sessionId }, window);
   const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch batches className courses mentorName status').lean();
-  const [rawRecords, activeSessions] = await Promise.all([
+  const [rawRecords, activeSessions, overrideRecord] = await Promise.all([
     AttendanceRecord.find(attendanceMatch)
       .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
       .sort({ attendedAt: 1 })
       .lean(),
     ActiveSession.find({ status: 'active', classSessionId: sessionId })
       .select('lmsId classSessionId joinedAt lastSeenAt status')
-      .lean()
+      .lean(),
+    attendanceDate
+      ? AttendanceWindowOverride.findOne({ sessionId, attendanceDate })
+        .select('sessionId attendanceDate classStartAt classEndAt updatedBy updatedAt createdAt')
+        .lean()
+      : null
   ]);
   const activeSessionsByLmsId = new Map(activeSessions.map((activeSession) => [activeSession.lmsId, activeSession]));
   const allRecords = rawRecords.map((record) => mergeRecordWithActiveSession(record, activeSessionsByLmsId.get(record.lmsId)));
-  const occurrenceKey = buildOccurrenceKey(sessionId, attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || '');
-  const occurrenceAnalytics = buildOccurrenceAnalytics(allRecords);
+  const resolvedAttendanceDate = attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || '';
+  const occurrenceKey = buildOccurrenceKey(sessionId, resolvedAttendanceDate);
+  const overrideMap = overrideRecord ? buildOccurrenceOverrideMap([overrideRecord]) : new Map();
+  const occurrenceAnalytics = buildOccurrenceAnalytics(allRecords, overrideMap);
   const occurrenceInfo = occurrenceAnalytics.get(occurrenceKey);
   const records = allRecords.map((record) => {
     const recordAttendanceDate = resolveAttendanceDate(record);
@@ -767,10 +878,17 @@ async function loadSessionAttendanceData(sessionId, query = {}) {
       course: Array.isArray(session?.courses) ? session.courses.join(', ') : (allRecords[0]?.course || ''),
       mentorName: session?.mentorName || allRecords[0]?.mentorName || '',
       className: session?.className || allRecords[0]?.className || '',
-      attendanceDate: attendanceDate || allRecords[0]?.attendanceDate || formatDateValue(allRecords[0]?.attendedAt) || null,
+      attendanceDate: resolvedAttendanceDate || null,
       occurrenceDurationMinutes: occurrenceInfo?.occurrenceDurationMinutes ?? 0,
       thresholdMinutes: occurrenceInfo?.thresholdMinutes ?? 0,
-      partialThresholdMinutes: occurrenceInfo?.partialThresholdMinutes ?? 0
+      partialThresholdMinutes: occurrenceInfo?.partialThresholdMinutes ?? 0,
+      classStartAt: occurrenceInfo?.occurrenceStartedAt || null,
+      classEndAt: occurrenceInfo?.occurrenceEndedAt || null,
+      configuredStartAt: occurrenceInfo?.overrideStartAt || null,
+      configuredEndAt: occurrenceInfo?.overrideEndAt || null,
+      classStartTime: formatTimeValue(occurrenceInfo?.overrideStartAt || occurrenceInfo?.occurrenceStartedAt),
+      classEndTime: formatTimeValue(occurrenceInfo?.overrideEndAt || occurrenceInfo?.occurrenceEndedAt),
+      windowOverrideApplied: occurrenceInfo?.overrideApplied || false
     },
     records
   };
@@ -922,6 +1040,106 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
   }
 });
 
+router.put('/session/:sessionId/window', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const sessionId = normalizeText(req.params.sessionId);
+    const attendanceDate = normalizeText(req.body?.attendanceDate);
+    const classStartTime = normalizeText(req.body?.classStartTime);
+    const classEndTime = normalizeText(req.body?.classEndTime);
+
+    if (!sessionId || !attendanceDate) {
+      return res.status(400).json({ success: false, message: 'Session ID and attendance date are required' });
+    }
+
+    const classStartAt = parseAttendanceWindowDateTime(attendanceDate, classStartTime);
+    const classEndAt = parseAttendanceWindowDateTime(attendanceDate, classEndTime);
+    if (!classStartAt || !classEndAt) {
+      return res.status(400).json({ success: false, message: 'Valid class start and end times are required' });
+    }
+
+    if (classEndAt.getTime() <= classStartAt.getTime()) {
+      return res.status(400).json({ success: false, message: 'Class end time must be later than class start time' });
+    }
+
+    const session = await ClassSession.findOne({ sessionId }).select('sessionId title').lean();
+    const overrideRecord = await AttendanceWindowOverride.findOneAndUpdate(
+      { sessionId, attendanceDate },
+      {
+        $set: {
+          classStartAt,
+          classEndAt,
+          updatedBy: req.admin.username || ''
+        }
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    await logSessionActivity({
+      sessionId,
+      sessionName: session?.title || sessionId,
+      userName: req.admin.username,
+      actionPerformed: 'Updated Attendance Window',
+      status: 'success',
+      remarks: `Set class window for ${attendanceDate} to ${classStartTime} - ${classEndTime}`
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Attendance timing updated successfully',
+      override: {
+        sessionId: overrideRecord.sessionId,
+        attendanceDate: overrideRecord.attendanceDate,
+        classStartAt: overrideRecord.classStartAt,
+        classEndAt: overrideRecord.classEndAt,
+        classStartTime: formatTimeValue(overrideRecord.classStartAt),
+        classEndTime: formatTimeValue(overrideRecord.classEndAt)
+      }
+    });
+  } catch (error) {
+    console.error('Error updating attendance window:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/session/:sessionId/window', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const sessionId = normalizeText(req.params.sessionId);
+    const attendanceDate = normalizeText(req.query.attendanceDate);
+
+    if (!sessionId || !attendanceDate) {
+      return res.status(400).json({ success: false, message: 'Session ID and attendance date are required' });
+    }
+
+    const session = await ClassSession.findOne({ sessionId }).select('sessionId title').lean();
+    await AttendanceWindowOverride.deleteOne({ sessionId, attendanceDate });
+
+    await logSessionActivity({
+      sessionId,
+      sessionName: session?.title || sessionId,
+      userName: req.admin.username,
+      actionPerformed: 'Cleared Attendance Window',
+      status: 'success',
+      remarks: `Removed class window override for ${attendanceDate}`
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Attendance timing reset to inferred session timing'
+    });
+  } catch (error) {
+    console.error('Error clearing attendance window:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 router.get('/session/:sessionId/export', authMiddleware, async (req, res) => {
   try {
     if (!ensureAdminRole(req, res)) {
@@ -978,7 +1196,10 @@ router.delete('/session/:sessionId/occurrence', authMiddleware, async (req, res)
     }
 
     const session = await ClassSession.findOne({ sessionId }).select('sessionId title').lean();
-    const result = await AttendanceRecord.deleteMany({ sessionId, attendanceDate });
+    const [result] = await Promise.all([
+      AttendanceRecord.deleteMany({ sessionId, attendanceDate }),
+      AttendanceWindowOverride.deleteOne({ sessionId, attendanceDate })
+    ]);
 
     await logSessionActivity({
       sessionId,

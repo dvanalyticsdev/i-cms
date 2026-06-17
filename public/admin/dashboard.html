@@ -651,6 +651,22 @@
                             <button id="clearAttendanceOccurrenceButton" type="button" class="btn btn-danger hidden" onclick="clearSelectedAttendanceOccurrence()">Clear Attendance</button>
                         </div>
                     </div>
+                    <div id="attendanceWindowPanel" class="attendance-window-panel hidden">
+                        <div class="attendance-window-fields">
+                            <div class="attendance-window-field">
+                                <label class="form-label" for="attendanceClassStartTime">Class Start Time</label>
+                                <input id="attendanceClassStartTime" type="time" class="form-input">
+                            </div>
+                            <div class="attendance-window-field">
+                                <label class="form-label" for="attendanceClassEndTime">Class End Time</label>
+                                <input id="attendanceClassEndTime" type="time" class="form-input">
+                            </div>
+                        </div>
+                        <div class="attendance-window-actions">
+                            <button id="saveAttendanceWindowButton" type="button" class="btn btn-primary" onclick="saveSelectedAttendanceWindow()">Save Timing</button>
+                            <button id="resetAttendanceWindowButton" type="button" class="btn btn-secondary" onclick="resetSelectedAttendanceWindow()">Reset Timing</button>
+                        </div>
+                    </div>
                     <div class="table-meta" id="attendanceDetailMeta">Choose a session to view attendance.</div>
                     <div id="attendanceDetailScrollRegion" class="table-container attendance-detail-table-container" tabindex="0" aria-label="Session attendance table. Scroll horizontally to view all columns with arrow keys, Home, or End.">
                         <table class="table attendance-detail-table" id="attendanceDetailTable">
