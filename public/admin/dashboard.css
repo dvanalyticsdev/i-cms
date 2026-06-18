@@ -464,8 +464,41 @@ body {
 
 .attendance-detail-actions {
     display: flex;
+    align-items: stretch;
+    justify-content: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.attendance-action-group {
+    display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-muted);
+}
+
+.attendance-action-group-danger {
+    border-color: rgba(255, 103, 55, 0.28);
+    background: rgba(255, 103, 55, 0.08);
+}
+
+.attendance-action-label {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-right: 2px;
+}
+
+.attendance-detail-actions .btn {
+    min-height: 42px;
+    white-space: nowrap;
+    padding-inline: 14px;
 }
 
 .attendance-window-panel {

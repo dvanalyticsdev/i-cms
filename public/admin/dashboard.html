@@ -649,10 +649,19 @@
                             <p class="section-subtitle">Student-level attendance for the selected session.</p>
                         </div>
                         <div class="attendance-detail-actions">
-                            <button id="reconcileAttendanceButton" type="button" class="btn btn-secondary" onclick="reconcileAttendanceRecordsNow()">Reconcile</button>
-                            <button id="closeAttendanceOccurrenceButton" type="button" class="btn btn-secondary hidden" onclick="closeSelectedAttendanceOccurrence()">Close Attendance Now</button>
-                            <button id="exportAttendanceOccurrenceButton" type="button" class="btn btn-secondary hidden" onclick="exportSelectedAttendanceOccurrence()">Export</button>
-                            <button id="clearAttendanceOccurrenceButton" type="button" class="btn btn-danger hidden" onclick="clearSelectedAttendanceOccurrence()">Clear Attendance</button>
+                            <div class="attendance-action-group">
+                                <span class="attendance-action-label">Maintenance</span>
+                                <button id="reconcileAttendanceButton" type="button" class="btn btn-secondary" onclick="reconcileAttendanceRecordsNow()">Reconcile</button>
+                                <button id="exportAttendanceOccurrenceButton" type="button" class="btn btn-secondary hidden" onclick="exportSelectedAttendanceOccurrence()">Export</button>
+                            </div>
+                            <div id="attendanceSessionActionGroup" class="attendance-action-group hidden">
+                                <span class="attendance-action-label">Session</span>
+                                <button id="closeAttendanceOccurrenceButton" type="button" class="btn btn-secondary hidden" onclick="closeSelectedAttendanceOccurrence()">Close Attendance</button>
+                            </div>
+                            <div id="attendanceDangerActionGroup" class="attendance-action-group attendance-action-group-danger hidden">
+                                <span class="attendance-action-label">Danger Zone</span>
+                                <button id="clearAttendanceOccurrenceButton" type="button" class="btn btn-danger hidden" onclick="clearSelectedAttendanceOccurrence()">Clear Records</button>
+                            </div>
                         </div>
                     </div>
                     <div id="attendanceWindowPanel" class="attendance-window-panel hidden">

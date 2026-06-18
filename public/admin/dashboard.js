@@ -3708,6 +3708,8 @@ function renderAttendanceDetailTable() {
     const clearButton = document.getElementById('clearAttendanceOccurrenceButton');
     const exportButton = document.getElementById('exportAttendanceOccurrenceButton');
     const closeButton = document.getElementById('closeAttendanceOccurrenceButton');
+    const sessionActionGroup = document.getElementById('attendanceSessionActionGroup');
+    const dangerActionGroup = document.getElementById('attendanceDangerActionGroup');
     if (!detailMeta || !detailList) return;
 
     const session = attendanceInsightsState.selectedSession;
@@ -3731,6 +3733,12 @@ function renderAttendanceDetailTable() {
         if (closeButton) {
             closeButton.classList.add('hidden');
         }
+        if (sessionActionGroup) {
+            sessionActionGroup.classList.add('hidden');
+        }
+        if (dangerActionGroup) {
+            dangerActionGroup.classList.add('hidden');
+        }
         if (detailPagination) {
             detailPagination.innerHTML = '';
         }
@@ -3745,6 +3753,12 @@ function renderAttendanceDetailTable() {
     }
     if (closeButton) {
         closeButton.classList.toggle('hidden', !session.attendanceDate);
+    }
+    if (sessionActionGroup) {
+        sessionActionGroup.classList.toggle('hidden', !session.attendanceDate);
+    }
+    if (dangerActionGroup) {
+        dangerActionGroup.classList.toggle('hidden', !session.attendanceDate);
     }
     syncAttendanceWindowInputs(session);
 
