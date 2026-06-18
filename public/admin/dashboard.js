@@ -3179,6 +3179,14 @@ function renderAttendanceInsights() {
     const metrics = attendanceInsightsState.metrics || {};
     document.getElementById('attendanceTotalStudents').textContent = metrics.totalStudents ?? 0;
     document.getElementById('attendanceTotalSessions').textContent = metrics.totalSessionsConducted ?? 0;
+    const openRecordsCard = document.getElementById('attendanceOpenRecords');
+    const anomalousRecordsCard = document.getElementById('attendanceAnomalousRecords');
+    if (openRecordsCard) {
+        openRecordsCard.textContent = metrics.openAttendanceRecords ?? 0;
+    }
+    if (anomalousRecordsCard) {
+        anomalousRecordsCard.textContent = metrics.anomalousRecords ?? 0;
+    }
     renderAttendanceRiskTable();
     renderAttendancePagination();
     renderAttendanceDetailTable();
@@ -3221,6 +3229,7 @@ function renderAttendanceRiskTable() {
                 <div class="attendance-session-date">${escapeHtml(formatAttendanceDay(session.attendanceDate))}</div>
                 <div class="attendance-session-title">${escapeHtml(session.sessionName || session.sessionId)}</div>
                 <div class="attendance-session-meta">${escapeHtml(session.sessionId)}</div>
+                <div class="attendance-session-meta">${escapeHtml(formatAttendanceHealthSummary(session))}</div>
                 <div class="attendance-session-meta">${escapeHtml(session.className || '-')} • ${escapeHtml(session.mentorName || '-')}</div>
             </td>
             <td class="session-access-cell">
@@ -3258,7 +3267,7 @@ async function viewAttendance(sessionId, showLoadingState = true, page = 1, atte
     if (showLoadingState && detailList) {
         detailList.innerHTML = `
             <tr>
-                <td colspan="7" style="text-align: center; padding: 40px; color: #999;">Loading session attendance...</td>
+                <td colspan="10" style="text-align: center; padding: 40px; color: #999;">Loading session attendance...</td>
             </tr>
         `;
     }
@@ -3328,7 +3337,7 @@ async function viewAttendance(sessionId, showLoadingState = true, page = 1, atte
         if (detailList) {
             detailList.innerHTML = `
                 <tr>
-                    <td colspan="7" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load session attendance')}</td>
+                    <td colspan="10" style="text-align: center; padding: 40px; color: #999;">${escapeHtml(error.message || 'Failed to load session attendance')}</td>
                 </tr>
             `;
         }
@@ -3383,6 +3392,151 @@ async function clearSelectedAttendanceOccurrence() {
     } catch (error) {
         console.error('Error clearing attendance occurrence:', error);
         showToast(error.message || 'Failed to clear attendance', 'error');
+    }
+}
+
+async function closeSelectedAttendanceOccurrence() {
+    const session = attendanceInsightsState.selectedSession;
+    const attendanceDate = session?.attendanceDate || '';
+    const sessionId = session?.sessionId || '';
+
+    if (!sessionId || !attendanceDate) {
+        showToast('Select a dated session occurrence first', 'error');
+        return;
+    }
+
+    const confirmed = confirm(`Close all open attendance for "${session.sessionName || sessionId}" on ${attendanceDate}?`);
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/attendance/session/${encodeURIComponent(sessionId)}/close`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ attendanceDate })
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to close attendance');
+        }
+
+        showToast(data.message || 'Attendance closed successfully', 'success');
+        await viewAttendance(sessionId, false, attendanceInsightsState.detailPagination?.page || 1, attendanceDate);
+        await loadAttendanceInsights(attendanceInsightsState.pagination?.page || 1);
+        await loadAttendanceRoster(attendanceInsightsState.rosterPagination?.page || 1);
+    } catch (error) {
+        console.error('Error closing attendance occurrence:', error);
+        showToast(error.message || 'Failed to close attendance', 'error');
+    }
+}
+
+async function reconcileAttendanceRecordsNow() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/attendance/reconcile`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to reconcile attendance');
+        }
+
+        const result = data.result || {};
+        showToast(`Reconciled attendance: ${result.closedAttendanceRecords || 0} orphaned record(s) closed, ${result.endedPortalSessions || 0} portal session(s) ended`, 'success');
+        await loadAttendanceInsights(attendanceInsightsState.pagination?.page || 1);
+        if (attendanceInsightsState.selectedSession?.sessionId) {
+            await viewAttendance(
+                attendanceInsightsState.selectedSession.sessionId,
+                false,
+                attendanceInsightsState.detailPagination?.page || 1,
+                attendanceInsightsState.selectedSession.attendanceDate || ''
+            );
+        }
+        await loadAttendanceRoster(attendanceInsightsState.rosterPagination?.page || 1);
+    } catch (error) {
+        console.error('Error reconciling attendance:', error);
+        showToast(error.message || 'Failed to reconcile attendance', 'error');
+    }
+}
+
+async function openAttendanceRecordReview(recordId) {
+    const record = (attendanceInsightsState.sessionAttendance || []).find(item => item.id === recordId);
+    if (!record) {
+        showToast('Attendance record not found', 'error');
+        return;
+    }
+
+    const durationInput = prompt('Update duration in minutes (leave blank to keep current value):', String(record.durationMinutes ?? ''));
+    if (durationInput === null) {
+        return;
+    }
+
+    const noteInput = prompt('Add a short review note (optional):', record.adminReviewNote || '');
+    if (noteInput === null) {
+        return;
+    }
+
+    const reviewStatus = confirm('Mark this record as reviewed? Click Cancel to keep it flagged/clean.') ? 'reviewed' : (record.reviewStatus || 'flagged');
+    const payload = {
+        reviewStatus,
+        adminReviewNote: noteInput
+    };
+
+    if (durationInput.trim() !== '') {
+        payload.durationMinutes = Number(durationInput);
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/attendance/record/${encodeURIComponent(recordId)}`, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to update attendance record');
+        }
+
+        showToast(data.message || 'Attendance record updated successfully', 'success');
+        if (attendanceInsightsState.selectedSession?.sessionId) {
+            await viewAttendance(
+                attendanceInsightsState.selectedSession.sessionId,
+                false,
+                attendanceInsightsState.detailPagination?.page || 1,
+                attendanceInsightsState.selectedSession.attendanceDate || ''
+            );
+        }
+        await loadAttendanceInsights(attendanceInsightsState.pagination?.page || 1);
+    } catch (error) {
+        console.error('Error updating attendance record:', error);
+        showToast(error.message || 'Failed to update attendance record', 'error');
     }
 }
 
@@ -3553,6 +3707,7 @@ function renderAttendanceDetailTable() {
     const detailPagination = document.getElementById('attendanceDetailPagination');
     const clearButton = document.getElementById('clearAttendanceOccurrenceButton');
     const exportButton = document.getElementById('exportAttendanceOccurrenceButton');
+    const closeButton = document.getElementById('closeAttendanceOccurrenceButton');
     if (!detailMeta || !detailList) return;
 
     const session = attendanceInsightsState.selectedSession;
@@ -3564,7 +3719,7 @@ function renderAttendanceDetailTable() {
         detailMeta.textContent = 'Choose a session to view attendance.';
         detailList.innerHTML = `
             <tr>
-                <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
+                <td colspan="10" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
             </tr>
         `;
         if (clearButton) {
@@ -3572,6 +3727,9 @@ function renderAttendanceDetailTable() {
         }
         if (exportButton) {
             exportButton.classList.add('hidden');
+        }
+        if (closeButton) {
+            closeButton.classList.add('hidden');
         }
         if (detailPagination) {
             detailPagination.innerHTML = '';
@@ -3584,6 +3742,9 @@ function renderAttendanceDetailTable() {
     }
     if (exportButton) {
         exportButton.classList.toggle('hidden', !session.attendanceDate);
+    }
+    if (closeButton) {
+        closeButton.classList.toggle('hidden', !session.attendanceDate);
     }
     syncAttendanceWindowInputs(session);
 
@@ -3601,7 +3762,7 @@ function renderAttendanceDetailTable() {
     if (records.length === 0) {
         detailList.innerHTML = `
             <tr>
-                <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No attendance records found for this session.</td>
+                <td colspan="10" style="text-align: center; padding: 40px; color: #999;">No attendance records found for this session.</td>
             </tr>
         `;
         if (detailPagination) {
@@ -3619,6 +3780,9 @@ function renderAttendanceDetailTable() {
             <td>${record.attendedAt ? escapeHtml(formatAttendanceDateTime(record.attendedAt)) : '-'}</td>
             <td>${escapeHtml(formatDuration(record.durationMinutes))}</td>
             <td><span class="risk-pill" style="${getAttendanceStatusPillStyle(record.status)}">${escapeHtml(formatAttendanceStatusLabel(record.status || 'low present'))}</span></td>
+            <td>${escapeHtml(formatAttendanceEndReason(record.attendanceEndReason, record.finalizedBy))}</td>
+            <td>${escapeHtml(formatAnomalySummary(record.anomalyFlags))}</td>
+            <td><button class="btn btn-secondary" onclick="openAttendanceRecordReview('${escapeHtml(record.id)}')">Review</button></td>
         </tr>
     `).join('');
 
@@ -3947,6 +4111,48 @@ function formatAttendanceStatusLabel(status) {
         return 'Partial Present';
     }
     return 'Low Present';
+}
+
+function formatAttendanceHealthSummary(item) {
+    const openCount = Number(item?.openAttendanceCount || 0);
+    const anomalousCount = Number(item?.anomalousCount || 0);
+    const parts = [];
+
+    if (openCount > 0) {
+        parts.push(`${openCount} open`);
+    }
+    if (anomalousCount > 0) {
+        parts.push(`${anomalousCount} flagged`);
+    }
+
+    return parts.length > 0 ? parts.join(' | ') : 'Healthy';
+}
+
+function formatAttendanceEndReason(reason, finalizedBy) {
+    const normalizedReason = String(reason || '').trim();
+    if (!normalizedReason) {
+        return finalizedBy ? `Open | ${finalizedBy}` : 'Open';
+    }
+
+    const label = normalizedReason
+        .split('_')
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+    return finalizedBy ? `${label} | ${finalizedBy}` : label;
+}
+
+function formatAnomalySummary(flags) {
+    const normalizedFlags = Array.isArray(flags)
+        ? flags.map(flag => String(flag || '').trim()).filter(Boolean)
+        : [];
+
+    if (normalizedFlags.length === 0) {
+        return 'Clean';
+    }
+
+    return normalizedFlags
+        .map(flag => flag.split('_').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' '))
+        .join(', ');
 }
 
 function formatIndianSessionLogDate(dateString) {

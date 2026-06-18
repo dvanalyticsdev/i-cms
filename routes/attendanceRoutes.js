@@ -7,6 +7,11 @@ const AttendanceRecord = require('../models/AttendanceRecord');
 const AttendanceWindowOverride = require('../models/AttendanceWindowOverride');
 const ActiveSession = require('../models/ActiveSession');
 const { logSessionActivity } = require('../utils/sessionLogger');
+const {
+  buildAnomalyFlags,
+  closeAttendanceForActiveSession,
+  reconcileAttendanceRecords
+} = require('../utils/attendanceTracker');
 
 const PRESENT_ATTENDANCE_THRESHOLD = 0.8;
 const PARTIAL_ATTENDANCE_THRESHOLD = 0.3;
@@ -159,6 +164,17 @@ function buildSectionRows(sectionName, records) {
 
 function resolveAttendanceDate(record) {
   return normalizeText(record?.attendanceDate) || formatDateValue(record?.attendedAt) || formatDateValue(record?.createdAt) || '';
+}
+
+function normalizeAnomalyFlags(record) {
+  const flags = Array.isArray(record?.anomalyFlags) && record.anomalyFlags.length > 0
+    ? record.anomalyFlags
+    : buildAnomalyFlags(record);
+  return Array.from(new Set(flags.map((value) => normalizeText(value)).filter(Boolean)));
+}
+
+function getAnomalyScore(record) {
+  return normalizeAnomalyFlags(record).length;
 }
 
 function sanitizeSheetName(value, fallback = 'Attendance') {
@@ -319,7 +335,7 @@ function mergeRecordWithActiveSession(record, activeSession) {
   }
 
   const activeJoinedAt = toValidDate(activeSession.joinedAt);
-  const activeLastSeenAt = toValidDate(activeSession.lastSeenAt) || new Date();
+  const activeLastSeenAt = toValidDate(activeSession.attendanceLastSeenAt) || toValidDate(activeSession.lastSeenAt) || new Date();
   const currentJoinStartedAt = toValidDate(record.currentJoinStartedAt) || activeJoinedAt;
   const firstJoinedAt = toValidDate(record.firstJoinedAt) || activeJoinedAt;
   const attendedAt = toValidDate(record.attendedAt) || firstJoinedAt || activeJoinedAt;
@@ -446,12 +462,12 @@ async function buildAttendanceSnapshot(query = {}) {
   const [students, attendanceRecords, sessions, activeSessions] = await Promise.all([
     Student.find(studentQuery).select('lmsId name mobile batch course createdAt').lean(),
     AttendanceRecord.find(attendanceMatch)
-      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
+      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes sessionSegments segmentHistory attendanceEndReason finalizedAt finalizedBy anomalyFlags anomalyScore reviewStatus adminReviewNote createdAt updatedAt')
       .sort({ attendedAt: 1 })
       .lean(),
     ClassSession.find(sessionQuery).select('sessionId title mentorName className batch batches courses status createdAt').sort({ createdAt: -1 }).lean(),
     ActiveSession.find({ status: 'active' })
-      .select('lmsId classSessionId joinedAt lastSeenAt status')
+      .select('lmsId classSessionId joinedAt lastSeenAt attendanceLastSeenAt status')
       .lean()
   ]);
 
@@ -576,6 +592,7 @@ async function buildAttendanceSnapshot(query = {}) {
     const occurrenceKey = buildOccurrenceKey(record.sessionId, attendanceDate);
     const analytics = occurrenceAnalytics.get(occurrenceKey);
     const attendeeStats = analytics?.attendeeStats?.get(record.lmsId);
+    const anomalyFlags = normalizeAnomalyFlags(record);
 
     return {
       ...record,
@@ -586,7 +603,9 @@ async function buildAttendanceSnapshot(query = {}) {
       attendancePercentage: attendeeStats?.attendancePercentage ?? 0,
       occurrenceDurationMinutes: analytics?.occurrenceDurationMinutes ?? 0,
       thresholdMinutes: analytics?.thresholdMinutes ?? 0,
-      partialThresholdMinutes: analytics?.partialThresholdMinutes ?? 0
+      partialThresholdMinutes: analytics?.partialThresholdMinutes ?? 0,
+      anomalyFlags,
+      anomalyScore: anomalyFlags.length
     };
   });
 
@@ -705,6 +724,9 @@ async function buildAttendanceSnapshot(query = {}) {
       const analytics = occurrenceAnalytics.get(occurrence.occurrenceKey);
       const presentStudents = analytics?.presentStudentIds?.size || 0;
       const joinedStudents = occurrence.uniqueStudents.size;
+      const occurrenceRecords = enrichedAttendanceRecords.filter((record) => record.occurrenceKey === occurrence.occurrenceKey);
+      const anomalousCount = occurrenceRecords.filter((record) => Number(record.anomalyScore || 0) > 0).length;
+      const openAttendanceCount = occurrenceRecords.filter((record) => record.currentJoinStartedAt).length;
       return {
         occurrenceKey: occurrence.occurrenceKey,
         sessionId: occurrence.sessionId,
@@ -718,6 +740,8 @@ async function buildAttendanceSnapshot(query = {}) {
         joinedCount: joinedStudents,
         attendancePercentage: getAttendanceRate(presentStudents, Math.max(students.length, 1)),
         attendanceDate: occurrence.attendanceDate || '',
+        anomalousCount,
+        openAttendanceCount,
         occurrenceDurationMinutes: analytics?.occurrenceDurationMinutes ?? 0,
         thresholdMinutes: analytics?.thresholdMinutes ?? 0,
         partialThresholdMinutes: analytics?.partialThresholdMinutes ?? 0,
@@ -770,6 +794,8 @@ async function buildAttendanceSnapshot(query = {}) {
   const totalPresentEntries = enrichedAttendanceRecords.filter((record) => record.status === 'present').length;
   const totalPossibleEntries = students.length * Math.max(sessionsConducted, 1);
   const overallAttendancePercentage = totalPossibleEntries > 0 ? Math.round((totalPresentEntries / totalPossibleEntries) * 1000) / 10 : 0;
+  const anomalousRecords = enrichedAttendanceRecords.filter((record) => Number(record.anomalyScore || 0) > 0);
+  const openAttendanceRecords = enrichedAttendanceRecords.filter((record) => record.currentJoinStartedAt);
 
   return {
     window,
@@ -786,7 +812,9 @@ async function buildAttendanceSnapshot(query = {}) {
       absentToday: Math.max(students.length - presentStudentIdsToday.size, 0),
       overallAttendancePercentage,
       studentsAtRisk: atRiskStudents.length,
-      totalSessionsConducted: sessionsConducted
+      totalSessionsConducted: sessionsConducted,
+      anomalousRecords: anomalousRecords.length,
+      openAttendanceRecords: openAttendanceRecords.length
     },
     trends: Array.from(trendMap.values())
       .map((entry) => ({
@@ -830,11 +858,11 @@ async function loadSessionAttendanceData(sessionId, query = {}) {
   const session = await ClassSession.findOne({ sessionId }).select('sessionId title batch batches className courses mentorName status').lean();
   const [rawRecords, activeSessions, overrideRecord] = await Promise.all([
     AttendanceRecord.find(attendanceMatch)
-      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes createdAt updatedAt')
+      .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes sessionSegments segmentHistory attendanceEndReason finalizedAt finalizedBy anomalyFlags anomalyScore reviewStatus adminReviewNote createdAt updatedAt')
       .sort({ attendedAt: 1 })
       .lean(),
     ActiveSession.find({ status: 'active', classSessionId: sessionId })
-      .select('lmsId classSessionId joinedAt lastSeenAt status')
+      .select('lmsId classSessionId joinedAt lastSeenAt attendanceLastSeenAt status')
       .lean(),
     attendanceDate
       ? AttendanceWindowOverride.findOne({ sessionId, attendanceDate })
@@ -854,8 +882,10 @@ async function loadSessionAttendanceData(sessionId, query = {}) {
     const recordOccurrenceKey = buildOccurrenceKey(record.sessionId, recordAttendanceDate);
     const analytics = occurrenceAnalytics.get(recordOccurrenceKey);
     const attendeeStats = analytics?.attendeeStats?.get(record.lmsId);
+    const anomalyFlags = normalizeAnomalyFlags(record);
 
     return {
+      id: String(record._id || ''),
       lmsId: record.lmsId,
       studentName: record.studentName,
       mobile: record.mobile || '',
@@ -865,7 +895,16 @@ async function loadSessionAttendanceData(sessionId, query = {}) {
       attendanceDate: recordAttendanceDate || null,
       status: attendeeStats?.status || record.status || 'low present',
       durationMinutes: attendeeStats?.durationMinutes ?? resolveDurationMinutes(record),
-      attendancePercentage: attendeeStats?.attendancePercentage ?? 0
+      attendancePercentage: attendeeStats?.attendancePercentage ?? 0,
+      currentJoinStartedAt: record.currentJoinStartedAt || null,
+      sessionSegments: Number(record.sessionSegments || 0),
+      attendanceEndReason: record.attendanceEndReason || '',
+      finalizedAt: record.finalizedAt || null,
+      finalizedBy: record.finalizedBy || '',
+      anomalyFlags,
+      anomalyScore: anomalyFlags.length,
+      reviewStatus: record.reviewStatus || (anomalyFlags.length > 0 ? 'flagged' : 'clean'),
+      adminReviewNote: record.adminReviewNote || ''
     };
   });
 
@@ -888,7 +927,9 @@ async function loadSessionAttendanceData(sessionId, query = {}) {
       configuredEndAt: occurrenceInfo?.overrideEndAt || null,
       classStartTime: formatTimeValue(occurrenceInfo?.overrideStartAt || occurrenceInfo?.occurrenceStartedAt),
       classEndTime: formatTimeValue(occurrenceInfo?.overrideEndAt || occurrenceInfo?.occurrenceEndedAt),
-      windowOverrideApplied: occurrenceInfo?.overrideApplied || false
+      windowOverrideApplied: occurrenceInfo?.overrideApplied || false,
+      anomalousCount: records.filter((record) => Number(record.anomalyScore || 0) > 0).length,
+      openAttendanceCount: records.filter((record) => record.currentJoinStartedAt).length
     },
     records
   };
@@ -1040,6 +1081,129 @@ router.get('/session/:sessionId', authMiddleware, async (req, res) => {
   }
 });
 
+router.post('/session/:sessionId/close', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const sessionId = normalizeText(req.params.sessionId);
+    const attendanceDate = normalizeText(req.body?.attendanceDate || req.query?.attendanceDate);
+    if (!sessionId || !attendanceDate) {
+      return res.status(400).json({ success: false, message: 'Session ID and attendance date are required' });
+    }
+
+    const session = await ClassSession.findOne({ sessionId }).select('sessionId title').lean();
+    const activeSessions = await ActiveSession.find({ status: 'active', classSessionId: sessionId });
+    let closedCount = 0;
+    for (const activeSession of activeSessions) {
+      const joinedAttendanceDate = formatDateValue(activeSession.joinedAt) || '';
+      if (joinedAttendanceDate === attendanceDate) {
+        await closeAttendanceForActiveSession(activeSession, new Date(), {
+          reason: 'admin_closed',
+          finalizedBy: req.admin.username || 'admin'
+        });
+        closedCount += 1;
+      }
+    }
+
+    await logSessionActivity({
+      sessionId,
+      sessionName: session?.title || sessionId,
+      userName: req.admin.username,
+      actionPerformed: 'Closed Attendance',
+      status: 'success',
+      remarks: `Closed ${closedCount} open attendance session(s) for ${attendanceDate}`
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Closed ${closedCount} open attendance session(s) for ${attendanceDate}`,
+      closedCount
+    });
+  } catch (error) {
+    console.error('Error closing attendance occurrence:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/reconcile', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const result = await reconcileAttendanceRecords({
+      finalizedBy: req.admin.username || 'admin-reconcile'
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Attendance reconciliation completed successfully',
+      result
+    });
+  } catch (error) {
+    console.error('Error reconciling attendance:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.patch('/record/:recordId', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const recordId = normalizeText(req.params.recordId);
+    if (!recordId) {
+      return res.status(400).json({ success: false, message: 'Record ID is required' });
+    }
+
+    const record = await AttendanceRecord.findById(recordId);
+    if (!record) {
+      return res.status(404).json({ success: false, message: 'Attendance record not found' });
+    }
+
+    const nextDurationMinutes = req.body?.durationMinutes;
+    const nextReviewStatus = normalizeText(req.body?.reviewStatus);
+    const adminReviewNote = normalizeText(req.body?.adminReviewNote);
+
+    if (nextDurationMinutes !== undefined) {
+      const parsedDuration = Number(nextDurationMinutes);
+      if (!Number.isFinite(parsedDuration) || parsedDuration < 0) {
+        return res.status(400).json({ success: false, message: 'Duration must be a valid positive number' });
+      }
+      record.durationMinutes = Math.round(parsedDuration * 10) / 10;
+      record.finalizedBy = req.admin.username || 'admin';
+      if (!record.finalizedAt) {
+        record.finalizedAt = new Date();
+      }
+      record.attendanceEndReason = record.attendanceEndReason || 'manual_adjustment';
+    }
+
+    if (nextReviewStatus && ['clean', 'flagged', 'reviewed'].includes(nextReviewStatus)) {
+      record.reviewStatus = nextReviewStatus;
+    }
+
+    if (adminReviewNote) {
+      record.adminReviewNote = adminReviewNote;
+    }
+
+    record.anomalyFlags = normalizeAnomalyFlags(record);
+    record.anomalyScore = getAnomalyScore(record);
+    await record.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Attendance record updated successfully',
+      record
+    });
+  } catch (error) {
+    console.error('Error updating attendance record:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 router.put('/session/:sessionId/window', authMiddleware, async (req, res) => {
   try {
     if (!ensureAdminRole(req, res)) {
@@ -1163,7 +1327,11 @@ router.get('/session/:sessionId/export', authMiddleware, async (req, res) => {
       'Attendance Date': record.attendanceDate || '',
       'Duration (Minutes)': Math.round(Number(record.durationMinutes || 0) * 10) / 10,
       'Attendance %': Math.round(Number(record.attendancePercentage || 0) * 10) / 10,
-      Status: record.status
+      Status: record.status,
+      'End Reason': record.attendanceEndReason || '',
+      'Finalized At': record.finalizedAt ? new Date(record.finalizedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '',
+      'Finalized By': record.finalizedBy || '',
+      Flags: Array.isArray(record.anomalyFlags) ? record.anomalyFlags.join(', ') : ''
     }));
     const worksheet = XLSX.utils.json_to_sheet(sheetRows);
     XLSX.utils.book_append_sheet(

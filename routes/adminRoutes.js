@@ -12,7 +12,7 @@ const IssueReport = require('../models/IssueReport');
 const SessionLog = require('../models/SessionLog');
 const { logSessionActivity, getTimestampParts } = require('../utils/sessionLogger');
 const { sanitizeLmsId } = require('../utils/studentValidation');
-const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
+const { closeAttendanceForActiveSession, endActiveSession } = require('../utils/attendanceTracker');
 const { normalizePaymentStatus, normalizeFeeStatusException } = require('../utils/classAccess');
 const CLASS_ACCESS_PAYMENT_STATUSES = ['DEFAULT', 'FULLY PAID', 'PENDING'];
 const SESSION_LOG_ALLOWED_ACTIONS = ['Created Session', 'Updated Session', 'Session Status Updated', 'Deleted Session'];
@@ -593,6 +593,20 @@ router.patch('/session/:id/status', authMiddleware, async (req, res) => {
     const updatedSession = await ClassSession.findByIdAndUpdate(req.params.id, { status }, { new: true });
     if (!updatedSession) return res.status(404).json({ success: false, message: 'Session not found' });
 
+    if (status === 'off') {
+      const activeSessions = await ActiveSession.find({
+        status: 'active',
+        classSessionId: updatedSession.sessionId
+      });
+
+      for (const activeSession of activeSessions) {
+        await closeAttendanceForActiveSession(activeSession, new Date(), {
+          reason: 'admin_closed',
+          finalizedBy: req.admin.username || 'admin'
+        });
+      }
+    }
+
     await logSessionActivity({
       sessionId: updatedSession.sessionId,
       sessionName: updatedSession.title,
@@ -621,12 +635,15 @@ router.delete('/session/:id', authMiddleware, async (req, res) => {
     const deletedSession = await ClassSession.findByIdAndDelete(req.params.id);
     if (!deletedSession) return res.status(404).json({ success: false, message: 'Session not found' });
 
-    const activeSessions = await ActiveSession.find({ status: 'active' });
+    const activeSessions = await ActiveSession.find({
+      status: 'active',
+      classSessionId: deletedSession.sessionId
+    });
     for (const activeSession of activeSessions) {
-      await finalizeAttendanceForActiveSession(activeSession, new Date());
-      activeSession.status = 'ended';
-      activeSession.endedAt = new Date();
-      await activeSession.save();
+      await closeAttendanceForActiveSession(activeSession, new Date(), {
+        reason: 'admin_closed',
+        finalizedBy: req.admin.username || 'admin'
+      });
     }
     await logSessionActivity({
       sessionId: deletedSession.sessionId,
@@ -1180,10 +1197,10 @@ router.delete('/revoke-id', authMiddleware, async (req, res) => {
     try {
       const activeSessions = await ActiveSession.find({ lmsId: idToRevoke, status: 'active' });
       for (const activeSession of activeSessions) {
-        await finalizeAttendanceForActiveSession(activeSession, new Date());
-        activeSession.status = 'ended';
-        activeSession.endedAt = new Date();
-        await activeSession.save();
+        await endActiveSession(activeSession, new Date(), {
+          reason: 'id_revoked',
+          finalizedBy: req.admin.username || 'admin'
+        });
       }
     } catch (dbError) {
       console.warn('Could not end active sessions in MongoDB:', dbError.message);

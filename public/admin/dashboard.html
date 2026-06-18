@@ -605,6 +605,8 @@
             <div class="stats-grid attendance-stats-grid">
                 <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendanceTotalStudents">0</div><div class="stat-label">Total Students</div></div>
                 <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendanceTotalSessions">0</div><div class="stat-label">Total Sessions Conducted</div></div>
+                <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendanceOpenRecords">0</div><div class="stat-label">Open Attendance</div></div>
+                <div class="stat-card attendance-stat-card"><div class="stat-number" id="attendanceAnomalousRecords">0</div><div class="stat-label">Flagged Records</div></div>
             </div>
 
             <div class="attendance-panels">
@@ -647,6 +649,8 @@
                             <p class="section-subtitle">Student-level attendance for the selected session.</p>
                         </div>
                         <div class="attendance-detail-actions">
+                            <button id="reconcileAttendanceButton" type="button" class="btn btn-secondary" onclick="reconcileAttendanceRecordsNow()">Reconcile</button>
+                            <button id="closeAttendanceOccurrenceButton" type="button" class="btn btn-secondary hidden" onclick="closeSelectedAttendanceOccurrence()">Close Attendance Now</button>
                             <button id="exportAttendanceOccurrenceButton" type="button" class="btn btn-secondary hidden" onclick="exportSelectedAttendanceOccurrence()">Export</button>
                             <button id="clearAttendanceOccurrenceButton" type="button" class="btn btn-danger hidden" onclick="clearSelectedAttendanceOccurrence()">Clear Attendance</button>
                         </div>
@@ -679,11 +683,14 @@
                                     <th>Joined At</th>
                                     <th>Duration</th>
                                     <th>Status</th>
+                                    <th>Closed By</th>
+                                    <th>Flags</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="attendanceDetailList">
                                 <tr>
-                                    <td colspan="7" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
+                                    <td colspan="10" style="text-align: center; padding: 40px; color: #999;">No session selected.</td>
                                 </tr>
                             </tbody>
                         </table>

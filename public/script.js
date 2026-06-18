@@ -448,6 +448,11 @@ function startSessionHeartbeat() {
       const response = await fetch(url);
       const data = await response.json();
 
+      if (data.success && data.attendanceEnded) {
+        handleAttendanceClosed(data.message || 'Attendance tracking has ended for this class.');
+        return;
+      }
+
       if (!data.success) {
         // Session is gone or belongs to a different device now
         console.warn('Heartbeat: session invalidated remotely. Logging out.');
@@ -493,6 +498,12 @@ function handleSessionRevoked() {
 
   // Inform the user with a clear, non-dismissible banner
   showErrorToast('You have been logged out because the same account signed in on another device.');
+}
+
+function handleAttendanceClosed(message) {
+  selectedSession = null;
+  showSessionSelection();
+  showErrorToast(message || 'Attendance tracking has ended for this class.');
 }
 
 /**
@@ -598,6 +609,12 @@ async function joinSession(sessionId) {
         const checkUrl = `${API_BASE_URL}/session/${encodeURIComponent(currentSession.lmsId)}?deviceToken=${encodeURIComponent(deviceToken)}`;
         const checkResponse = await fetch(checkUrl);
         const checkData = await checkResponse.json();
+
+        if (checkData.success && checkData.attendanceEnded) {
+          hideLoadingModal();
+          handleAttendanceClosed(checkData.message || 'Attendance tracking has ended for this class.');
+          return;
+        }
 
         if (!checkData.success) {
           hideLoadingModal();

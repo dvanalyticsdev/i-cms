@@ -6,7 +6,12 @@ const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
 const ClassAccessRule = require('../models/ClassAccessRule');
 const { generateZoomSignature } = require('../utils/zoomSignature');
-const { finalizeAttendanceForActiveSession, recordSessionJoin } = require('../utils/attendanceTracker');
+const {
+  closeAttendanceForActiveSession,
+  formatAttendanceDate,
+  getActiveSessionTerminationContext,
+  recordSessionJoin
+} = require('../utils/attendanceTracker');
 const { mapRulesByKey, isClassAccessible } = require('../utils/classAccess');
 
 function getSessionBatches(session) {
@@ -142,6 +147,25 @@ router.post('/join-session', async (req, res) => {
       });
     }
 
+    const joinTime = new Date();
+    const joinTermination = await getActiveSessionTerminationContext({
+      lmsId: req.body?.lmsId || 'anonymous',
+      classSessionId: session.sessionId,
+      joinedAt: joinTime
+    }, joinTime);
+
+    if (joinTermination.shouldTerminate) {
+      return res.status(403).json({
+        success: false,
+        sessionEnded: true,
+        sessionInactive: joinTermination.reason === 'session-inactive',
+        attendanceWindowEnded: joinTermination.reason === 'window_end',
+        message: joinTermination.reason === 'window_end'
+          ? 'This class attendance window has ended.'
+          : 'This session is no longer active.'
+      });
+    }
+
     let zoomSignature = null;
     try {
       zoomSignature = generateZoomSignature(session.meetingNumber, 0);
@@ -184,16 +208,27 @@ router.post('/join-session', async (req, res) => {
         }
         const existingActiveSession = await ActiveSession.findOne({ lmsId, status: 'active' });
 
-        if (existingActiveSession) {
-          const endedAt = new Date();
-          await finalizeAttendanceForActiveSession(existingActiveSession, endedAt);
+        if (existingActiveSession?.classSessionId && existingActiveSession.classSessionId !== session.sessionId) {
+          await closeAttendanceForActiveSession(existingActiveSession, new Date(), {
+            reason: 'rejoin',
+            finalizedBy: 'system-rejoin'
+          });
         }
 
         await ActiveSession.updateOne(
           { lmsId: lmsId, status: 'active' },
           (() => {
             const joinedAt = new Date();
-            return { $set: { classSessionId: session.sessionId, meetingNumber: session.meetingNumber, joinedAt, lastSeenAt: joinedAt, endedAt: null } };
+            return {
+              $set: {
+                classSessionId: session.sessionId,
+                meetingNumber: session.meetingNumber,
+                joinedAt,
+                lastSeenAt: joinedAt,
+                attendanceLastSeenAt: joinedAt,
+                endedAt: null
+              }
+            };
           })()
         );
 
@@ -257,13 +292,40 @@ router.post('/attendance/start', async (req, res) => {
     }
 
     const joinedAt = new Date();
-    const attendanceDate = joinedAt.toLocaleDateString('en-CA');
+    const attendanceDate = formatAttendanceDate(joinedAt);
+
+    if (session.status === 'off') {
+      return res.status(403).json({
+        success: false,
+        message: 'Session is currently inactive'
+      });
+    }
 
     if (activeSession) {
+      const termination = await getActiveSessionTerminationContext({
+        _id: activeSession._id,
+        lmsId: activeSession.lmsId,
+        classSessionId: session.sessionId,
+        joinedAt
+      }, joinedAt);
+
+      if (termination.shouldTerminate) {
+        return res.status(403).json({
+          success: false,
+          sessionEnded: true,
+          sessionInactive: termination.reason === 'session-inactive',
+          attendanceWindowEnded: termination.reason === 'window_end',
+          message: termination.reason === 'window_end'
+            ? 'This class attendance window has ended.'
+            : 'This class session is no longer active.'
+        });
+      }
+
       activeSession.classSessionId = session.sessionId;
       activeSession.meetingNumber = session.meetingNumber || activeSession.meetingNumber;
       activeSession.joinedAt = joinedAt;
       activeSession.lastSeenAt = joinedAt;
+      activeSession.attendanceLastSeenAt = joinedAt;
       activeSession.endedAt = null;
       await activeSession.save();
     }

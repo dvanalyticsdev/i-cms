@@ -4,9 +4,13 @@ const crypto = require('crypto');
 const ActiveSession = require('../models/ActiveSession');
 const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
-const AttendanceRecord = require('../models/AttendanceRecord');
 const { sanitizeLmsId } = require('../utils/studentValidation');
-const { finalizeAttendanceForActiveSession } = require('../utils/attendanceTracker');
+const {
+  closeAttendanceForActiveSession,
+  endActiveSession,
+  getActiveSessionTerminationContext,
+  touchActiveAttendanceHeartbeat
+} = require('../utils/attendanceTracker');
 const { findStudentInWorkbook } = require('../utils/workbookSync');
 const { getEffectivePaymentStatus } = require('../utils/classAccess');
 
@@ -108,11 +112,7 @@ router.post('/verify-student', async (req, res) => {
         });
       }
       
-      const endedAt = new Date();
-      await finalizeAttendanceForActiveSession(existingSession, endedAt);
-      existingSession.status = 'ended';
-      existingSession.endedAt = endedAt;
-      await existingSession.save();
+      await endActiveSession(existingSession, new Date(), { reason: 'relogin', finalizedBy: 'system' });
     }
 
     const sessionToken = `TOKEN_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
@@ -198,11 +198,7 @@ router.post('/force-logout', async (req, res) => {
 
     const activeSession = await ActiveSession.findOne({ lmsId: sanitizedLmsId, status: 'active' });
     if (activeSession) {
-      const endedAt = new Date();
-      await finalizeAttendanceForActiveSession(activeSession, endedAt);
-      activeSession.status = 'ended';
-      activeSession.endedAt = endedAt;
-      await activeSession.save();
+      await endActiveSession(activeSession, new Date(), { reason: 'force_logout', finalizedBy: 'system' });
     }
 
     return res.status(200).json({
@@ -242,11 +238,7 @@ router.post('/logout', async (req, res) => {
       });
     }
 
-    const endedAt = new Date();
-    await finalizeAttendanceForActiveSession(activeSession, endedAt);
-    activeSession.status = 'ended';
-    activeSession.endedAt = endedAt;
-    await activeSession.save();
+    await endActiveSession(activeSession, new Date(), { reason: 'logout', finalizedBy: 'student' });
 
     return res.status(200).json({
       success: true,
@@ -275,11 +267,7 @@ router.get('/session/:lmsId', async (req, res) => {
     if (!deviceToken) return res.status(400).json({ success: false, message: 'Device token is required' });
 
     const now = new Date();
-    const sessionData = await ActiveSession.findOneAndUpdate(
-      { lmsId: lmsId.trim(), status: 'active' },
-      { $set: { lastSeenAt: now } },
-      { new: true }
-    ).lean();
+    const sessionData = await ActiveSession.findOne({ lmsId: lmsId.trim(), status: 'active' }).lean();
 
     if (!sessionData) {
       return res.status(404).json({
@@ -292,16 +280,11 @@ router.get('/session/:lmsId', async (req, res) => {
     if (studentRecord && resolvePaymentStatus(studentRecord, lmsId.trim()) === 'DEFAULT') {
       if (sessionData.classSessionId) {
         try {
-          await finalizeAttendanceForActiveSession(sessionData, now);
+          await endActiveSession(sessionData, now, { reason: 'fee_blocked', finalizedBy: 'system' });
         } catch (err) {
           console.warn('Failed to finalize attendance during fee-pending enforcement:', err.message);
         }
       }
-
-      await ActiveSession.updateOne(
-        { _id: sessionData._id },
-        { $set: { status: 'ended', endedAt: now, lastSeenAt: now } }
-      );
 
       return res.status(403).json({
         success: false,
@@ -317,20 +300,28 @@ router.get('/session/:lmsId', async (req, res) => {
       });
     }
 
-    if (sessionData.classSessionId) {
-      try {
-        await AttendanceRecord.updateOne(
-          {
-            lmsId: sessionData.lmsId,
-            sessionId: sessionData.classSessionId,
-            currentJoinStartedAt: { $ne: null }
-          },
-          { $set: { lastSeenAt: now } }
-        );
-      } catch (err) {
-        console.warn('Failed to update AttendanceRecord lastSeenAt on heartbeat:', err.message);
-      }
+    const termination = await getActiveSessionTerminationContext(sessionData, now);
+    if (termination.shouldTerminate) {
+      await closeAttendanceForActiveSession(sessionData, termination.endedAt || now, {
+        reason: termination.reason,
+        finalizedBy: 'system-heartbeat'
+      });
+
+      return res.status(200).json({
+        success: true,
+        attendanceEnded: true,
+        sessionInactive: termination.reason === 'session-inactive',
+        attendanceWindowEnded: termination.reason === 'window_end',
+        attendanceEndReason: termination.reason,
+        message: termination.reason === 'window_end'
+          ? 'This class attendance window has ended.'
+          : termination.reason === 'stale'
+            ? 'Attendance tracking stopped because activity was lost.'
+            : 'This class session is no longer active.'
+      });
     }
+
+    await touchActiveAttendanceHeartbeat(sessionData, now);
 
     return res.status(200).json({
       success: true,

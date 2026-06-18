@@ -95,6 +95,70 @@ const attendanceRecordSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    segmentHistory: {
+      type: [
+        {
+          joinedAt: {
+            type: Date,
+            default: null
+          },
+          leftAt: {
+            type: Date,
+            default: null
+          },
+          durationMinutes: {
+            type: Number,
+            default: 0
+          },
+          source: {
+            type: String,
+            default: 'session-join',
+            trim: true
+          },
+          endReason: {
+            type: String,
+            default: '',
+            trim: true
+          }
+        }
+      ],
+      default: []
+    },
+    attendanceEndReason: {
+      type: String,
+      default: '',
+      trim: true,
+      index: true
+    },
+    finalizedAt: {
+      type: Date,
+      default: null,
+      index: true
+    },
+    finalizedBy: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    anomalyFlags: {
+      type: [String],
+      default: []
+    },
+    anomalyScore: {
+      type: Number,
+      default: 0
+    },
+    reviewStatus: {
+      type: String,
+      enum: ['clean', 'flagged', 'reviewed'],
+      default: 'clean',
+      index: true
+    },
+    adminReviewNote: {
+      type: String,
+      default: '',
+      trim: true
+    },
     status: {
       type: String,
       enum: ['present', 'absent'],
@@ -116,5 +180,6 @@ const attendanceRecordSchema = new mongoose.Schema(
 attendanceRecordSchema.index({ lmsId: 1, sessionId: 1, attendanceDate: 1 }, { unique: true });
 attendanceRecordSchema.index({ attendanceDate: 1, course: 1, batch: 1, sessionId: 1 });
 attendanceRecordSchema.index({ mentorName: 1, sessionId: 1 });
+attendanceRecordSchema.index({ currentJoinStartedAt: 1, finalizedAt: 1 });
 
 module.exports = mongoose.model('AttendanceRecord', attendanceRecordSchema);

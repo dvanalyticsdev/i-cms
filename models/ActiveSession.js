@@ -70,6 +70,11 @@ const activeSessionSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
       index: true
+    },
+    attendanceLastSeenAt: {
+      type: Date,
+      default: null,
+      index: true
     }
   },
   {
