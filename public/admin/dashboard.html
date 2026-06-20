@@ -767,18 +767,42 @@
         </section>
 
         <!-- Issue Section Tab -->
-        <section id="issue-section-tab" class="tab-content page-section" data-page-title="Issue Section" data-page-subtitle="Review issues reported from the login page and remove them after resolution">
+        <section id="issue-section-tab" class="tab-content page-section" data-page-title="Issue Section" data-page-subtitle="Track login-page issues as tickets and close them after resolution">
             <div class="section-header page-section-header">
-                <button class="btn btn-secondary" onclick="loadIssues()" title="Refresh issues">
-                    <span>🔄 Refresh</span>
-                </button>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="loadIssues()" title="Refresh issues">
+                        <span>Refresh</span>
+                    </button>
+                    <button class="btn btn-danger" onclick="clearResolvedIssues()" title="Clear resolved and closed issues">
+                        <span>Clear Resolved Issues</span>
+                    </button>
+                </div>
             </div>
 
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-number" id="totalIssues">0</div>
-                    <div class="stat-label">Reported Issues</div>
+                    <div class="stat-label">Total Tickets</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="openIssues">0</div>
+                    <div class="stat-label">Open Tickets</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="resolvedIssues">0</div>
+                    <div class="stat-label">Resolved / Closed</div>
+                </div>
+            </div>
+
+            <div class="table-toolbar table-toolbar-wrap">
+                <select id="issueStatusFilter" class="form-input table-toolbar-select" onchange="loadIssues()">
+                    <option value="all">All Statuses</option>
+                    <option value="open">Open</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="closed">Closed</option>
+                </select>
+                <input type="text" id="issueSearch" class="form-input table-toolbar-search" placeholder="Search LMS ID, name, phone, or issue..." oninput="handleIssueSearch()">
             </div>
 
             <div class="table-container">
@@ -789,13 +813,14 @@
                             <th>Name</th>
                             <th>Phone Number</th>
                             <th>Issue Description</th>
+                            <th>Status</th>
                             <th>Reported</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="issuesList">
                         <tr class="loading-row">
-                            <td colspan="6" style="text-align: center; padding: 40px;">
+                            <td colspan="7" style="text-align: center; padding: 40px;">
                                 <div class="spinner"></div>
                                 <p>Loading issues...</p>
                             </td>
@@ -1237,24 +1262,6 @@
                 <div style="display: flex; gap: 10px; justify-content: flex-end;">
                     <button class="btn btn-secondary" onclick="closeDeleteStudentModal()">Cancel</button>
                     <button class="btn btn-danger" onclick="confirmDeleteStudent()" style="background: #dc3545;">Delete</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Delete Issue Confirmation Modal -->
-    <div id="deleteIssueModal" class="modal hidden">
-        <div class="modal-overlay" onclick="closeDeleteIssueModal()"></div>
-        <div class="modal-container" style="max-width: 400px;">
-            <div class="modal-header">
-                <h3 class="modal-title">Delete Issue?</h3>
-                <button class="modal-close" onclick="closeDeleteIssueModal()">Close</button>
-            </div>
-            <div class="modal-body">
-                <p id="deleteIssueMessage" style="margin-bottom: 20px;">Are you sure you want to delete this issue? This action cannot be undone.</p>
-                <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                    <button class="btn btn-secondary" onclick="closeDeleteIssueModal()">Cancel</button>
-                    <button class="btn btn-danger" onclick="confirmDeleteIssue()" style="background: #dc3545;">Delete</button>
                 </div>
             </div>
         </div>

@@ -229,7 +229,28 @@ async function ensureClassAccessRulesForAllCourses() {
  */
 router.get('/issues', authMiddleware, async (req, res) => {
   try {
-    const issues = await IssueReport.find().sort({ createdAt: -1 }).lean();
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const status = normalizeText(req.query.status).toLowerCase();
+    const search = normalizeText(req.query.search).toLowerCase();
+    const query = {};
+
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    let issues = await IssueReport.find(query).sort({ createdAt: -1 }).lean();
+
+    if (search) {
+      issues = issues.filter((issue) => {
+        return [issue.lmsId, issue.name, issue.phoneNumber, issue.description, issue.status]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(search));
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Issues retrieved successfully',
@@ -243,23 +264,60 @@ router.get('/issues', authMiddleware, async (req, res) => {
 });
 
 /**
- * DELETE /api/admin/issues/:id
+ * PATCH /api/admin/issues/:id
  */
-router.delete('/issues/:id', authMiddleware, async (req, res) => {
+router.patch('/issues/:id', authMiddleware, async (req, res) => {
   try {
-    const deletedIssue = await IssueReport.findByIdAndDelete(req.params.id);
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
 
-    if (!deletedIssue) {
+    const nextStatus = normalizeText(req.body?.status).toLowerCase();
+    const allowedStatuses = new Set(['open', 'in_progress', 'resolved', 'closed']);
+
+    if (!allowedStatuses.has(nextStatus)) {
+      return res.status(400).json({ success: false, message: 'Valid issue status is required' });
+    }
+
+    const updatedIssue = await IssueReport.findByIdAndUpdate(
+      req.params.id,
+      { $set: { status: nextStatus } },
+      { new: true }
+    ).lean();
+
+    if (!updatedIssue) {
       return res.status(404).json({ success: false, message: 'Issue not found' });
     }
 
     return res.status(200).json({
       success: true,
-      message: 'Issue deleted successfully',
-      issue: deletedIssue
+      message: 'Issue updated successfully',
+      issue: updatedIssue
     });
   } catch (error) {
-    console.error('Error deleting issue:', error.message);
+    console.error('Error updating issue:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
+ * DELETE /api/admin/issues/resolved
+ */
+router.delete('/issues/resolved', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const result = await IssueReport.deleteMany({ status: { $in: ['resolved', 'closed'] } });
+
+    return res.status(200).json({
+      success: true,
+      message: `Cleared ${result.deletedCount || 0} resolved issue(s)`,
+      deletedCount: result.deletedCount || 0
+    });
+  } catch (error) {
+    console.error('Error clearing resolved issues:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });

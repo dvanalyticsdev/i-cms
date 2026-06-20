@@ -24,7 +24,7 @@ let studentSearchTimer = null;
 let deleteTargetLmsId = null;
 let availableBatches = [];
 let allIssues = [];
-let deleteTargetIssueId = null;
+let issueSearchTimer = null;
 let allSessionLogs = [];
 let availableMentors = [];
 let sessionLogsMeta = { page: 1, limit: 10, total: 0, totalPages: 1 };
@@ -2419,7 +2419,13 @@ function renderStudentsPagination() {
  */
 async function loadIssues() {
     try {
-        const response = await fetch(`${API_BASE_URL}/issues`, {
+        const status = document.getElementById('issueStatusFilter')?.value || 'all';
+        const search = document.getElementById('issueSearch')?.value.trim() || '';
+        const params = new URLSearchParams({
+            status,
+            search
+        });
+        const response = await fetch(`${API_BASE_URL}/issues?${params.toString()}`, {
             headers: {
                 'Authorization': `Bearer ${authToken}`
             }
@@ -2455,7 +2461,7 @@ function renderIssues() {
     if (allIssues.length === 0) {
         issuesList.innerHTML = `
             <tr>
-                <td colspan="6" style="text-align: center; padding: 40px;">
+                <td colspan="7" style="text-align: center; padding: 40px;">
                     <p style="color: #999;">No issues reported yet</p>
                 </td>
             </tr>
@@ -2469,10 +2475,11 @@ function renderIssues() {
             <td>${escapeHtml(issue.name)}</td>
             <td>${issue.phoneNumber ? escapeHtml(issue.phoneNumber) : '-'}</td>
             <td><div class="issue-description">${escapeHtml(issue.description)}</div></td>
+            <td><span class="issue-status-badge ${escapeHtml(getIssueStatusClass(issue.status))}">${escapeHtml(formatIssueStatus(issue.status))}</span></td>
             <td>${formatDate(issue.createdAt)}</td>
             <td>
                 <div class="actions">
-                    <button class="btn-action delete" onclick="openDeleteIssueModal('${issue._id}')" title="Delete">Delete</button>
+                    ${buildIssueActionButtons(issue)}
                 </div>
             </td>
         </tr>
@@ -2484,35 +2491,98 @@ function renderIssues() {
  */
 function updateIssueStats() {
     document.getElementById('totalIssues').textContent = allIssues.length;
+    document.getElementById('openIssues').textContent = allIssues.filter(issue => {
+        const status = String(issue?.status || 'open').trim().toLowerCase();
+        return status === 'open' || status === 'in_progress';
+    }).length;
+    document.getElementById('resolvedIssues').textContent = allIssues.filter(issue => {
+        const status = String(issue?.status || 'open').trim().toLowerCase();
+        return status === 'resolved' || status === 'closed';
+    }).length;
 }
 
-/**
- * Open delete issue confirmation modal
- */
-function openDeleteIssueModal(issueId) {
-    deleteTargetIssueId = issueId;
-    const issue = allIssues.find(item => item._id === issueId);
-    const issueName = issue ? issue.name : 'this user';
-    document.getElementById('deleteIssueMessage').textContent = `Are you sure you want to delete the issue reported by ${issueName}? This action cannot be undone.`;
-    document.getElementById('deleteIssueModal').classList.remove('hidden');
+function handleIssueSearch() {
+    window.clearTimeout(issueSearchTimer);
+    issueSearchTimer = window.setTimeout(() => {
+        loadIssues();
+    }, 180);
 }
 
-/**
- * Close delete issue modal
- */
-function closeDeleteIssueModal() {
-    document.getElementById('deleteIssueModal').classList.add('hidden');
-    deleteTargetIssueId = null;
+function formatIssueStatus(status) {
+    const normalizedStatus = String(status || 'open').trim().toLowerCase();
+    if (normalizedStatus === 'in_progress') {
+        return 'In Progress';
+    }
+    return normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1);
 }
 
-/**
- * Confirm delete issue
- */
-async function confirmDeleteIssue() {
-    if (!deleteTargetIssueId) return;
+function getIssueStatusClass(status) {
+    const normalizedStatus = String(status || 'open').trim().toLowerCase();
+    if (normalizedStatus === 'in_progress') {
+        return 'issue-status-in-progress';
+    }
+    if (normalizedStatus === 'resolved') {
+        return 'issue-status-resolved';
+    }
+    if (normalizedStatus === 'closed') {
+        return 'issue-status-closed';
+    }
+    return 'issue-status-open';
+}
+
+function buildIssueActionButtons(issue) {
+    const normalizedStatus = String(issue?.status || 'open').trim().toLowerCase();
+    const actions = [];
+
+    if (normalizedStatus === 'open') {
+        actions.push(`<button class="btn-action progress" onclick="updateIssueStatus('${escapeHtml(issue._id)}', 'in_progress')">Start</button>`);
+        actions.push(`<button class="btn-action success" onclick="updateIssueStatus('${escapeHtml(issue._id)}', 'resolved')">Resolve</button>`);
+    } else if (normalizedStatus === 'in_progress') {
+        actions.push(`<button class="btn-action edit" onclick="updateIssueStatus('${escapeHtml(issue._id)}', 'open')">Reopen</button>`);
+        actions.push(`<button class="btn-action success" onclick="updateIssueStatus('${escapeHtml(issue._id)}', 'resolved')">Resolve</button>`);
+    } else if (normalizedStatus === 'resolved') {
+        actions.push(`<button class="btn-action edit" onclick="updateIssueStatus('${escapeHtml(issue._id)}', 'open')">Reopen</button>`);
+        actions.push(`<button class="btn-action neutral" onclick="updateIssueStatus('${escapeHtml(issue._id)}', 'closed')">Close</button>`);
+    } else {
+        actions.push(`<button class="btn-action edit" onclick="updateIssueStatus('${escapeHtml(issue._id)}', 'open')">Reopen</button>`);
+    }
+
+    return actions.join('');
+}
+
+async function updateIssueStatus(issueId, status) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ status })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to update issue');
+        }
+
+        showToast(data.message || 'Issue updated successfully', 'success');
+        await loadIssues();
+    } catch (error) {
+        console.error('Error updating issue:', error);
+        showToast(error.message || 'Error updating issue', 'error');
+    }
+}
+
+async function clearResolvedIssues() {
+    const confirmed = confirm('Clear all resolved and closed issues? Open and in-progress tickets will be kept.');
+    if (!confirmed) {
+        return;
+    }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/issues/${deleteTargetIssueId}`, {
+        const response = await fetch(`${API_BASE_URL}/issues/resolved`, {
             method: 'DELETE',
             headers: {
                 'Authorization': `Bearer ${authToken}`
@@ -2521,17 +2591,15 @@ async function confirmDeleteIssue() {
 
         const data = await response.json();
 
-        if (!response.ok) {
-            throw new Error(data.message || 'Failed to delete issue');
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to clear resolved issues');
         }
 
-        showToast('Issue deleted successfully', 'success');
-        closeDeleteIssueModal();
-        loadIssues();
-
+        showToast(data.message || 'Resolved issues cleared successfully', 'success');
+        await loadIssues();
     } catch (error) {
-        console.error('Error deleting issue:', error);
-        showToast(error.message || 'Error deleting issue', 'error');
+        console.error('Error clearing resolved issues:', error);
+        showToast(error.message || 'Error clearing resolved issues', 'error');
     }
 }
 
