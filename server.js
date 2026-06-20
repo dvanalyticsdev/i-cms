@@ -25,6 +25,35 @@ app.use(compression());
 // MONGODB CONNECTION
 // ====================================
 
+async function cleanupLegacyAttendanceIndexes() {
+  try {
+    const attendanceCollection = mongoose.connection.collection('attendance_records');
+    const attendanceIndexes = await attendanceCollection.indexes();
+
+    for (const index of attendanceIndexes) {
+      if (!index?.name || index.name === '_id_' || !index.key) {
+        continue;
+      }
+
+      const indexKeys = Object.keys(index.key);
+      const isLegacySessionIndex = index.unique
+        && indexKeys.length === 2
+        && index.key.lmsId === 1
+        && index.key.sessionId === 1
+        && !Object.prototype.hasOwnProperty.call(index.key, 'attendanceDate');
+
+      if (!isLegacySessionIndex) {
+        continue;
+      }
+
+      await attendanceCollection.dropIndex(index.name);
+      console.log(`Dropped legacy attendance index ${index.name}`);
+    }
+  } catch (err) {
+    // Ignore legacy index cleanup issues so the app can still boot on fresh databases.
+  }
+}
+
 /**
  * Initialize MongoDB connection
  * MongoDB is used for:
@@ -43,6 +72,7 @@ const initializeDatabase = async () => {
     }
 
     console.log('✓ MongoDB connected successfully');
+    await cleanupLegacyAttendanceIndexes();
 
     // Attempt to drop the old unique index on attendance_records if it exists
     try {
