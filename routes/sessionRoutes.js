@@ -23,6 +23,35 @@ function getSessionBatches(session) {
   return batch ? [batch] : [];
 }
 
+function getStudentBatches(student) {
+  if (Array.isArray(student?.batches) && student.batches.length > 0) {
+    return Array.from(new Set(
+      student.batches.map(batch => String(batch || '').trim()).filter(Boolean)
+    ));
+  }
+
+  const batch = String(student?.batch || '').trim();
+  return batch ? [batch] : [];
+}
+
+function hasStudentBatchAccess(student, session) {
+  const studentBatches = getStudentBatches(student);
+  const sessionBatches = getSessionBatches(session);
+
+  if (studentBatches.length === 0 || sessionBatches.length === 0) {
+    return true;
+  }
+
+  return studentBatches.some(batch => sessionBatches.includes(batch));
+}
+
+function resolveStudentBatchForSession(student, session) {
+  const studentBatches = getStudentBatches(student);
+  const sessionBatches = getSessionBatches(session);
+  const matchedBatch = studentBatches.find(batch => sessionBatches.includes(batch));
+  return matchedBatch || studentBatches[0] || '';
+}
+
 /**
  * GET /api/class-sessions
  */
@@ -30,6 +59,7 @@ router.get('/class-sessions', async (req, res) => {
   try {
     let studentCourse = null;
     let studentBatch = null;
+    let studentBatches = [];
     let studentRecord = null;
     let accessRuleMap = null;
     const { lmsId } = req.query;
@@ -52,7 +82,8 @@ router.get('/class-sessions', async (req, res) => {
       } else if (student && student.course) {
         studentRecord = student;
         studentCourse = student.course;
-        studentBatch = student.batch || null;
+        studentBatches = getStudentBatches(student);
+        studentBatch = studentBatches[0] || null;
         const rules = await ClassAccessRule.find({}).lean();
         accessRuleMap = mapRulesByKey(rules);
       }
@@ -67,8 +98,7 @@ router.get('/class-sessions', async (req, res) => {
         .lean();
       
       const filteredSessions = allSessions.filter(session => {
-        const sessionBatches = getSessionBatches(session);
-        if (studentBatch && sessionBatches.length > 0 && !sessionBatches.includes(studentBatch)) {
+        if (studentRecord && !hasStudentBatchAccess(studentRecord, session)) {
           return false;
         }
         if (studentRecord && session.className) {
@@ -91,7 +121,8 @@ router.get('/class-sessions', async (req, res) => {
         sessions: filteredSessions,
         total: filteredSessions.length,
         studentCourse: studentCourse,
-        studentBatch: studentBatch
+        studentBatch: studentBatch,
+        studentBatches
       });
     } else {
       const sessions = await ClassSession.find()
@@ -183,8 +214,7 @@ router.post('/join-session', async (req, res) => {
     try {
       if (lmsId) {
         const student = await Student.findOne({ lmsId }).lean();
-        const sessionBatches = getSessionBatches(session);
-        if (student && student.batch && sessionBatches.length > 0 && !sessionBatches.includes(student.batch)) {
+        if (student && !hasStudentBatchAccess(student, session)) {
           return res.status(403).json({
             success: false,
             message: 'This session is assigned to a different batch'
@@ -291,6 +321,13 @@ router.post('/attendance/start', async (req, res) => {
       });
     }
 
+    if (!hasStudentBatchAccess(student, session)) {
+      return res.status(403).json({
+        success: false,
+        message: 'This session is assigned to a different batch'
+      });
+    }
+
     const joinedAt = new Date();
     const attendanceDate = formatAttendanceDate(joinedAt);
 
@@ -335,7 +372,7 @@ router.post('/attendance/start', async (req, res) => {
       studentName: student.name || lmsId,
       mobile: student.mobile || '',
       course: student.course || '',
-      batch: student.batch || '',
+      batch: resolveStudentBatchForSession(student, session),
       sessionId: session.sessionId,
       sessionName: session.title,
       mentorName: session.mentorName || '',

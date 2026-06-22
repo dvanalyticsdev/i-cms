@@ -55,6 +55,15 @@ function parseBatchNames(batches) {
   );
 }
 
+function getStudentBatchNames(student) {
+  const normalizedBatches = parseBatchNames(student?.batches);
+  if (normalizedBatches.length > 0) {
+    return normalizedBatches;
+  }
+
+  return parseBatchNames(student?.batch);
+}
+
 function normalizePosterImage(posterImage) {
   if (posterImage === undefined) {
     return undefined;
@@ -1281,7 +1290,10 @@ router.delete('/revoke-id', authMiddleware, async (req, res) => {
  */
 router.get('/students/batches', authMiddleware, async (req, res) => {
   try {
-    const batches = await Student.distinct('batch');
+    const students = await Student.find({}).select('batch batches').lean();
+    const batches = Array.from(new Set(
+      students.flatMap(student => getStudentBatchNames(student))
+    )).sort((left, right) => left.localeCompare(right));
     return res.status(200).json({ success: true, batches: batches.filter(Boolean) });
   } catch (error) {
     console.error('Error retrieving student batches:', error.message);
@@ -1316,6 +1328,7 @@ router.get('/students', authMiddleware, async (req, res) => {
         { lmsId: new RegExp(escapedSearch, 'i') },
         { name: new RegExp(escapedSearch, 'i') },
         { batch: new RegExp(escapedSearch, 'i') },
+        { batches: new RegExp(escapedSearch, 'i') },
         { mobile: new RegExp(escapedSearch, 'i') },
         { emailId: new RegExp(escapedSearch, 'i') },
         { paymentStatus: new RegExp(escapedSearch, 'i') }
@@ -1349,9 +1362,9 @@ router.get('/students', authMiddleware, async (req, res) => {
  */
 router.post('/students', authMiddleware, async (req, res) => {
   try {
-    const { lmsId, name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException } = req.body;
+    const { lmsId, name, mobile, emailId, batch, batches, course, year, paymentStatus, feeStatusException } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
-    const normalizedBatch = normalizeText(batch);
+    const normalizedBatches = parseBatchNames(batches !== undefined ? batches : batch);
 
     let coursesArray = [];
     if (Array.isArray(course)) {
@@ -1360,8 +1373,8 @@ router.post('/students', authMiddleware, async (req, res) => {
       coursesArray = course.split(',').map(c => normalizeText(c)).filter(Boolean);
     }
 
-    if (!sanitizedLmsId || !name || !normalizedBatch || coursesArray.length === 0) {
-      return res.status(400).json({ success: false, message: 'LMS ID, Name, Batch, and at least one Course are required' });
+    if (!sanitizedLmsId || !name || normalizedBatches.length === 0 || coursesArray.length === 0) {
+      return res.status(400).json({ success: false, message: 'LMS ID, Name, at least one Batch, and at least one Course are required' });
     }
 
     const duplicateLmsId = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
@@ -1374,7 +1387,8 @@ router.post('/students', authMiddleware, async (req, res) => {
       name: name.trim(),
       mobile: normalizeText(mobile).replace(/\D/g, ''),
       emailId: normalizeText(emailId).toLowerCase(),
-      batch: normalizedBatch,
+      batch: normalizedBatches[0],
+      batches: normalizedBatches,
       course: coursesArray,
       year: normalizeText(year),
       paymentStatus: normalizePaymentStatus(paymentStatus),
@@ -1397,9 +1411,9 @@ router.post('/students', authMiddleware, async (req, res) => {
 router.put('/students/:lmsId', authMiddleware, async (req, res) => {
   try {
     const { lmsId } = req.params;
-    const { name, mobile, emailId, batch, course, year, paymentStatus, feeStatusException } = req.body;
+    const { name, mobile, emailId, batch, batches, course, year, paymentStatus, feeStatusException } = req.body;
     const sanitizedLmsId = sanitizeLmsId(lmsId);
-    const normalizedBatch = normalizeText(batch);
+    const normalizedBatches = parseBatchNames(batches !== undefined ? batches : batch);
 
     let coursesArray = [];
     if (Array.isArray(course)) {
@@ -1408,8 +1422,8 @@ router.put('/students/:lmsId', authMiddleware, async (req, res) => {
       coursesArray = course.split(',').map(c => normalizeText(c)).filter(Boolean);
     }
 
-    if (!name || !normalizedBatch || coursesArray.length === 0) {
-      return res.status(400).json({ success: false, message: 'Name, Batch, and at least one Course are required' });
+    if (!name || normalizedBatches.length === 0 || coursesArray.length === 0) {
+      return res.status(400).json({ success: false, message: 'Name, at least one Batch, and at least one Course are required' });
     }
 
     const existingStudent = await Student.findOne({ lmsId: sanitizedLmsId }).lean();
@@ -1423,7 +1437,8 @@ router.put('/students/:lmsId', authMiddleware, async (req, res) => {
         name: name.trim(),
         mobile: normalizeText(mobile).replace(/\D/g, ''),
         emailId: normalizeText(emailId).toLowerCase(),
-        batch: normalizedBatch,
+        batch: normalizedBatches[0],
+        batches: normalizedBatches,
         course: coursesArray,
         year: normalizeText(year),
         paymentStatus: normalizePaymentStatus(paymentStatus),

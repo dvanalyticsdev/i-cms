@@ -118,6 +118,46 @@ const initializeDatabase = async () => {
       console.error('Error migrating student course fields:', err.message);
     }
 
+    // Migrate student batch field from String to batches array while preserving
+    // the legacy primary batch field used by older parts of the app.
+    try {
+      const studentCollection = mongoose.connection.collection('students');
+      const cursor = studentCollection.find({
+        $or: [
+          { batches: { $exists: false } },
+          { batches: { $size: 0 } }
+        ]
+      });
+      let migratedCount = 0;
+      for await (const student of cursor) {
+        const primaryBatch = String(student.batch || '').trim();
+        const batchesArray = primaryBatch
+          .split(',')
+          .map(batch => batch.trim())
+          .filter(Boolean);
+
+        if (batchesArray.length === 0) {
+          continue;
+        }
+
+        await studentCollection.updateOne(
+          { _id: student._id },
+          {
+            $set: {
+              batch: batchesArray[0],
+              batches: batchesArray
+            }
+          }
+        );
+        migratedCount++;
+      }
+      if (migratedCount > 0) {
+        console.log(`Migrated ${migratedCount} student(s) to multiple batch arrays`);
+      }
+    } catch (err) {
+      console.error('Error migrating student batch fields:', err.message);
+    }
+
     // Start background finalizer to run every 1 minute.
     // The timeout inside autoFinalizeStaleSessions is intentionally long so
     // an in-progress Zoom session is not ended after a brief heartbeat gap.

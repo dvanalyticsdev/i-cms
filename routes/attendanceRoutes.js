@@ -89,13 +89,21 @@ function resolveWindow(query = {}) {
 function buildStudentQuery(query = {}) {
   const studentQuery = {};
   if (query.batch) {
-    studentQuery.batch = query.batch;
+    studentQuery.$or = [{ batch: query.batch }, { batches: query.batch }];
   }
   if (query.course) {
     studentQuery.course = query.course;
   }
 
   return studentQuery;
+}
+
+function formatStudentBatch(student) {
+  const batches = Array.isArray(student?.batches) && student.batches.length > 0
+    ? student.batches.map((batch) => normalizeText(batch)).filter(Boolean)
+    : [normalizeText(student?.batch)].filter(Boolean);
+
+  return batches.length > 0 ? Array.from(new Set(batches)).join(', ') : 'Unassigned';
 }
 
 function buildAttendanceMatch(query = {}, window = {}) {
@@ -460,7 +468,7 @@ async function buildAttendanceSnapshot(query = {}) {
   }
 
   const [students, attendanceRecords, sessions, activeSessions] = await Promise.all([
-    Student.find(studentQuery).select('lmsId name mobile batch course createdAt').lean(),
+    Student.find(studentQuery).select('lmsId name mobile batch batches course createdAt').lean(),
     AttendanceRecord.find(attendanceMatch)
       .select('lmsId studentName mobile course batch sessionId sessionName mentorName className attendanceDate attendedAt status firstJoinedAt currentJoinStartedAt lastSeenAt leftAt durationMinutes sessionSegments segmentHistory attendanceEndReason finalizedAt finalizedBy anomalyFlags anomalyScore reviewStatus adminReviewNote createdAt updatedAt')
       .sort({ attendedAt: 1 })
@@ -672,7 +680,7 @@ async function buildAttendanceSnapshot(query = {}) {
       return {
         lmsId: student.lmsId,
         name: student.name,
-        batch: student.batch || 'Unassigned',
+        batch: formatStudentBatch(student),
         course: Array.isArray(student.course) ? student.course.join(', ') : (student.course || 'Unassigned'),
         mobile: student.mobile || '',
         attendancePercentage,
@@ -701,7 +709,7 @@ async function buildAttendanceSnapshot(query = {}) {
       lmsId: student.lmsId,
       name: student.name,
       mobile: student.mobile || '',
-      batch: student.batch || 'Unassigned',
+      batch: formatStudentBatch(student),
       course: Array.isArray(student.course) ? student.course.join(', ') : (student.course || 'Unassigned'),
       attendancePercentage,
       presentSessions,

@@ -23,6 +23,7 @@ let studentSearchQuery = { search: '', course: '', paymentStatus: '' };
 let studentSearchTimer = null;
 let deleteTargetLmsId = null;
 let availableBatches = [];
+let studentBatchSelection = new Set();
 let allIssues = [];
 let issueSearchTimer = null;
 let allSessionLogs = [];
@@ -115,6 +116,20 @@ function getSessionBatches(session) {
 
 function formatSessionBatches(session) {
     const batches = getSessionBatches(session);
+    return batches.length > 0 ? batches.join(', ') : '-';
+}
+
+function getStudentBatches(student) {
+    if (Array.isArray(student?.batches) && student.batches.length > 0) {
+        return Array.from(new Set(student.batches.map(batch => String(batch || '').trim()).filter(Boolean)));
+    }
+
+    const batch = String(student?.batch || '').trim();
+    return batch ? [batch] : [];
+}
+
+function formatStudentBatches(student) {
+    const batches = getStudentBatches(student);
     return batches.length > 0 ? batches.join(', ') : '-';
 }
 
@@ -588,6 +603,88 @@ function renderStudentCoursesCheckboxes(selectedCourses = []) {
     `).join('');
 
     container.innerHTML = `<div class="selection-list" style="display: flex; flex-direction: column; gap: 4px; padding: 8px; max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background-color: var(--surface-muted, #f8f9fa);">${checkboxesHtml}</div>`;
+}
+
+function getSelectedStudentBatches() {
+    return Array.from(studentBatchSelection);
+}
+
+function toggleStudentBatchSelection(input) {
+    const value = input?.value?.trim();
+    if (!value) {
+        return;
+    }
+
+    if (input.checked) {
+        studentBatchSelection.add(value);
+    } else {
+        studentBatchSelection.delete(value);
+    }
+}
+
+function addCustomStudentBatch() {
+    const searchInput = document.getElementById('studentBatchSearch');
+    const value = searchInput?.value?.trim();
+    if (!value) {
+        return;
+    }
+
+    if (!availableBatches.includes(value)) {
+        availableBatches = [...availableBatches, value].sort((left, right) => left.localeCompare(right));
+    }
+
+    studentBatchSelection.add(value);
+    if (searchInput) {
+        searchInput.value = '';
+    }
+    renderStudentBatchOptions();
+}
+
+function renderStudentBatchOptions(selectedBatches = null) {
+    const container = document.getElementById('studentBatchContainer');
+    if (!container) {
+        return;
+    }
+
+    const selectedSet = new Set(selectedBatches || getSelectedStudentBatches());
+    studentBatchSelection = new Set(selectedSet);
+    const searchTerm = (document.getElementById('studentBatchSearch')?.value || '').trim().toLowerCase();
+    const batches = Array.from(new Set([...availableBatches, ...selectedSet]))
+        .sort((left, right) => left.localeCompare(right))
+        .filter(batch => !searchTerm || batch.toLowerCase().includes(searchTerm));
+
+    if (batches.length === 0) {
+        const pendingValue = (document.getElementById('studentBatchSearch')?.value || '').trim();
+        container.innerHTML = pendingValue
+            ? `
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <p style="color: #999; font-size: 12px;">No batches match your search.</p>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addCustomStudentBatch()">Add "${escapeHtml(pendingValue)}"</button>
+                </div>
+            `
+            : '<p style="color: #999; font-size: 12px;">No batches match your search.</p>';
+        return;
+    }
+
+    const listMarkup = batches.map(batch => `
+        <label class="course-checkbox">
+            <input type="checkbox" value="${escapeHtml(batch)}" ${selectedSet.has(batch) ? 'checked' : ''} onchange="toggleStudentBatchSelection(this)">
+            <span>${escapeHtml(batch)}</span>
+        </label>
+    `).join('');
+
+    const pendingValue = (document.getElementById('studentBatchSearch')?.value || '').trim();
+    const hasPendingCustomValue = pendingValue && !batches.some(batch => batch.toLowerCase() === pendingValue.toLowerCase());
+    const addButtonMarkup = hasPendingCustomValue
+        ? `<button type="button" class="btn btn-secondary btn-sm" onclick="addCustomStudentBatch()">Add "${escapeHtml(pendingValue)}"</button>`
+        : '';
+
+    container.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            ${addButtonMarkup}
+            ${listMarkup}
+        </div>
+    `;
 }
 
 /**
@@ -2368,6 +2465,7 @@ async function loadStudentBatches() {
             availableBatches = data.batches || [];
             populateAttendanceFilterOptions();
             populateSessionBatchOptions();
+            renderStudentBatchOptions();
         }
     } catch (error) {
         console.error('Error loading student batches:', error);
@@ -2636,7 +2734,7 @@ function renderStudents() {
             <td>${escapeHtml(student.name)}</td>
             <td>${escapeHtml(student.mobile || '-')}</td>
             <td>${escapeHtml(student.emailId || '-')}</td>
-            <td>${escapeHtml(student.batch || '-')}</td>
+            <td>${escapeHtml(formatStudentBatches(student))}</td>
             <td>${escapeHtml(student.year || '-')}</td>
             <td>${escapeHtml(Array.isArray(student.course) ? student.course.join(', ') : (student.course || '-'))}</td>
             <td>${escapeHtml(student.paymentStatus || 'DEFAULT')}</td>
@@ -2721,7 +2819,10 @@ function openAddStudentModal() {
     document.getElementById('studentOriginalLmsId').value = '';
     document.getElementById('studentLmsId').value = '';
     document.getElementById('studentMobile').value = '';
-    document.getElementById('studentBatch').value = '';
+    const studentBatchSearch = document.getElementById('studentBatchSearch');
+    if (studentBatchSearch) {
+        studentBatchSearch.value = '';
+    }
     document.getElementById('studentName').value = '';
     document.getElementById('studentEmailId').value = '';
     document.getElementById('studentYear').value = '';
@@ -2731,6 +2832,7 @@ function openAddStudentModal() {
     document.getElementById('studentSubmitText').textContent = 'Add Student';
     document.getElementById('studentLmsId').disabled = false;
     renderStudentCoursesCheckboxes([]);
+    renderStudentBatchOptions([]);
     
     document.getElementById('studentModal').classList.remove('hidden');
 }
@@ -2746,7 +2848,10 @@ function openEditStudentModal(lmsId) {
     document.getElementById('studentOriginalLmsId').value = lmsId;
     document.getElementById('studentLmsId').value = student.lmsId;
     document.getElementById('studentMobile').value = student.mobile || '';
-    document.getElementById('studentBatch').value = student.batch || '';
+    const studentBatchSearch = document.getElementById('studentBatchSearch');
+    if (studentBatchSearch) {
+        studentBatchSearch.value = '';
+    }
     document.getElementById('studentName').value = student.name;
     document.getElementById('studentEmailId').value = student.emailId || '';
     document.getElementById('studentYear').value = student.year || '';
@@ -2756,6 +2861,7 @@ function openEditStudentModal(lmsId) {
     document.getElementById('studentSubmitText').textContent = 'Save Changes';
     document.getElementById('studentLmsId').disabled = true;  // Cannot change LMS ID
     renderStudentCoursesCheckboxes(student.course || []);
+    renderStudentBatchOptions(getStudentBatches(student));
     
     document.getElementById('studentModal').classList.remove('hidden');
 }
@@ -2776,7 +2882,7 @@ async function handleSaveStudent(event) {
     const editMode = document.getElementById('studentEditMode').value === 'true';
     const lmsId = document.getElementById('studentLmsId').value.trim();
     const mobile = document.getElementById('studentMobile').value.trim();
-    const batch = document.getElementById('studentBatch').value.trim();
+    const batches = getSelectedStudentBatches();
     const name = document.getElementById('studentName').value.trim();
     const emailId = document.getElementById('studentEmailId').value.trim();
     const year = document.getElementById('studentYear').value.trim();
@@ -2787,8 +2893,8 @@ async function handleSaveStudent(event) {
     const paymentStatus = document.getElementById('studentPaymentStatus').value;
     const feeStatusException = document.getElementById('studentFeeStatusException').value === 'true';
 
-    if (!lmsId || !batch || !name || courses.length === 0) {
-        showToast('Please fill in LMS ID, Name, Batch, and select at least one Course', 'error');
+    if (!lmsId || batches.length === 0 || !name || courses.length === 0) {
+        showToast('Please fill in LMS ID, Name, select at least one Batch, and select at least one Course', 'error');
         return;
     }
 
@@ -2802,7 +2908,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ name, mobile, emailId, batch, course: courses, year, paymentStatus, feeStatusException })
+                body: JSON.stringify({ name, mobile, emailId, batch: batches[0], batches, course: courses, year, paymentStatus, feeStatusException })
             });
         } else {
             // Add new student
@@ -2812,7 +2918,7 @@ async function handleSaveStudent(event) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({ lmsId, name, mobile, emailId, batch, course: courses, year, paymentStatus, feeStatusException })
+                body: JSON.stringify({ lmsId, name, mobile, emailId, batch: batches[0], batches, course: courses, year, paymentStatus, feeStatusException })
             });
         }
 
@@ -2825,6 +2931,7 @@ async function handleSaveStudent(event) {
         showToast(editMode ? 'Student updated successfully' : 'Student added successfully', 'success');
         closeStudentModal();
         loadStudents(editMode ? studentPageMeta.page : 1);
+        loadStudentBatches();
 
     } catch (error) {
         console.error('Error saving student:', error);
@@ -2875,6 +2982,7 @@ async function confirmDeleteStudent() {
         showToast('Student deleted successfully', 'success');
         closeDeleteStudentModal();
         loadStudents(studentPageMeta.page);
+        loadStudentBatches();
 
     } catch (error) {
         console.error('Error deleting student:', error);

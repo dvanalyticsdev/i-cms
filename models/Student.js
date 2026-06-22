@@ -32,6 +32,17 @@ const studentSchema = new mongoose.Schema(
       trim: true,
       index: true
     },
+    batches: {
+      type: [String],
+      required: true,
+      validate: {
+        validator: function(v) {
+          return Array.isArray(v) && v.length > 0;
+        },
+        message: 'A student must be enrolled in at least one batch'
+      },
+      index: true
+    },
     course: {
       type: [String],
       required: true,

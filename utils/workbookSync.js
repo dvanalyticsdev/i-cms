@@ -25,6 +25,7 @@ function readStudentWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH) {
     emailId: normalizeText(row['EMAIL ID']).toLowerCase(),
     course: normalizeText(row.Course).split(',').map((c) => c.trim()).filter(Boolean),
     batch: normalizeText(row.BATCH),
+    batches: normalizeText(row.BATCH) ? [normalizeText(row.BATCH)] : [],
     year: normalizeText(row.YEAR),
     paymentStatus: normalizePaymentStatus(row['PAYMENT STATUS'])
   })).filter((row) => row.lmsId && row.name && row.course.length > 0 && row.batch);
