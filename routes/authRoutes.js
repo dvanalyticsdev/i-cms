@@ -121,7 +121,6 @@ router.post('/verify-student', async (req, res) => {
       sessionToken,
       lmsId: sanitizedLmsId,
       name: name ? name.trim() : (userInfo?.name || sanitizedLmsId),
-      phoneNumber: userInfo?.mobile || null,
       deviceToken,
       status: 'active'
     });
