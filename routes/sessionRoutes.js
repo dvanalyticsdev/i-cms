@@ -245,22 +245,39 @@ router.post('/join-session', async (req, res) => {
           });
         }
 
+        const joinedAt = new Date();
+        const attendanceDate = formatAttendanceDate(joinedAt);
+
         await ActiveSession.updateOne(
           { lmsId: lmsId, status: 'active' },
-          (() => {
-            const joinedAt = new Date();
-            return {
-              $set: {
-                classSessionId: session.sessionId,
-                meetingNumber: session.meetingNumber,
-                joinedAt,
-                lastSeenAt: joinedAt,
-                attendanceLastSeenAt: joinedAt,
-                endedAt: null
-              }
-            };
-          })()
+          {
+            $set: {
+              classSessionId: session.sessionId,
+              meetingNumber: session.meetingNumber,
+              joinedAt,
+              lastSeenAt: joinedAt,
+              attendanceLastSeenAt: joinedAt,
+              endedAt: null
+            }
+          }
         );
+
+        if (student) {
+          await recordSessionJoin({
+            lmsId,
+            studentName: student.name || lmsId,
+            mobile: student.mobile || '',
+            course: Array.isArray(student.course) ? student.course[0] || '' : (student.course || ''),
+            batch: resolveStudentBatchForSession(student, session),
+            sessionId: session.sessionId,
+            sessionName: session.title,
+            mentorName: session.mentorName || '',
+            className: session.className || '',
+            attendanceDate,
+            source: 'session-join',
+            joinedAt
+          });
+        }
 
       }
     } catch (err) {
