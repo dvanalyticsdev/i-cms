@@ -2428,7 +2428,8 @@ html[data-theme="light"] .icms-logo-text {
     position: relative;
     user-select: none;
     cursor: pointer;
-    background: white;
+    background: var(--input-bg);
+    color: var(--text);
 }
 
 .multiselect-dropdown-toggle {
@@ -2436,25 +2437,26 @@ html[data-theme="light"] .icms-logo-text {
     justify-content: space-between;
     align-items: center;
     padding: 10px 12px;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     border-radius: 6px;
     font-size: 14px;
-    background: white;
+    background: var(--input-bg);
+    color: var(--text);
     height: 100%;
 }
 
 .multiselect-dropdown-toggle:hover {
-    border-color: var(--primary-color);
+    border-color: var(--primary);
 }
 
 .multiselect-dropdown.active .multiselect-dropdown-toggle {
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    border-color: var(--primary);
+    box-shadow: var(--input-shadow);
 }
 
 .dropdown-icon {
     font-size: 10px;
-    color: var(--text-secondary);
+    color: var(--text-muted);
     transition: transform 0.2s ease;
 }
 
@@ -2469,8 +2471,8 @@ html[data-theme="light"] .icms-logo-text {
     left: 0;
     width: 250px;
     max-height: 300px;
-    background: white;
-    border: 1px solid var(--border-color);
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 6px;
     box-shadow: var(--shadow-lg);
     z-index: 1000;
@@ -2483,20 +2485,22 @@ html[data-theme="light"] .icms-logo-text {
 
 .multiselect-dropdown-search-container {
     padding: 8px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
 }
 
 .multiselect-dropdown-search {
     width: 100%;
     padding: 6px 8px;
-    border: 1px solid var(--border-color);
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
     border-radius: 4px;
     font-size: 12px;
 }
 
 .multiselect-dropdown-search:focus {
     outline: none;
-    border-color: var(--primary-color);
+    border-color: var(--primary);
 }
 
 .multiselect-dropdown-options-list {
@@ -2511,13 +2515,13 @@ html[data-theme="light"] .icms-logo-text {
     gap: 8px;
     padding: 8px 12px;
     font-size: 13px;
-    color: var(--text-primary);
+    color: var(--text);
     transition: background 0.2s ease;
     cursor: pointer;
 }
 
 .multiselect-dropdown-option:hover {
-    background-color: var(--neutral-bg);
+    background-color: var(--row-hover);
 }
 
 .multiselect-dropdown-option input[type="checkbox"] {
