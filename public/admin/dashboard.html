@@ -592,9 +592,20 @@
                 <select id="attendanceMentorFilter" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
                     <option value="">All Mentors</option>
                 </select>
-                <select id="attendanceBatchFilter" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
-                    <option value="">All Batches</option>
-                </select>
+                <div class="multiselect-dropdown table-toolbar-select" id="attendanceBatchFilterDropdown">
+                    <div class="multiselect-dropdown-toggle" onclick="event.stopPropagation(); toggleAttendanceBatchFilterDropdown();">
+                        <span class="multiselect-dropdown-label">All Batches</span>
+                        <i class="dropdown-icon">▼</i>
+                    </div>
+                    <div class="multiselect-dropdown-menu" onclick="event.stopPropagation();">
+                        <div class="multiselect-dropdown-search-container">
+                            <input type="text" placeholder="Search batches..." class="multiselect-dropdown-search" oninput="filterAttendanceBatchOptions(this.value)">
+                        </div>
+                        <div class="multiselect-dropdown-options-list" id="attendanceBatchOptionsList">
+                            <!-- Options populated dynamically -->
+                        </div>
+                    </div>
+                </div>
                 <select id="attendanceSessionFilter" class="form-input table-toolbar-select" onchange="applyAttendanceFilters()">
                     <option value="">All Sessions</option>
                 </select>

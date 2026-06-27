@@ -53,6 +53,8 @@ let attendanceInsightsState = {
 let attendanceInsightsLoading = false;
 let attendanceRosterSearchTimer = null;
 let sessionBatchSelection = new Set();
+let selectedAttendanceBatches = [];
+let attendanceBatchFilterSearchTerm = '';
 const attendanceDemoData = {
     metrics: {
         totalStudents: 42,
@@ -2990,23 +2992,69 @@ async function confirmDeleteStudent() {
     }
 }
 
+function toggleAttendanceBatchFilterDropdown() {
+    const dropdown = document.getElementById('attendanceBatchFilterDropdown');
+    if (!dropdown) return;
+    dropdown.classList.toggle('active');
+}
+
+function toggleAttendanceBatchFilterSelection(checkbox) {
+    const value = checkbox.value;
+    if (checkbox.checked) {
+        if (!selectedAttendanceBatches.includes(value)) {
+            selectedAttendanceBatches.push(value);
+        }
+    } else {
+        selectedAttendanceBatches = selectedAttendanceBatches.filter(item => item !== value);
+    }
+    updateAttendanceBatchFilterLabel();
+    applyAttendanceFilters();
+}
+
+function updateAttendanceBatchFilterLabel() {
+    const label = document.querySelector('#attendanceBatchFilterDropdown .multiselect-dropdown-label');
+    if (!label) return;
+    if (selectedAttendanceBatches.length === 0) {
+        label.textContent = 'All Batches';
+    } else if (selectedAttendanceBatches.length === 1) {
+        label.textContent = selectedAttendanceBatches[0];
+    } else {
+        label.textContent = `${selectedAttendanceBatches.length} Batches Selected`;
+    }
+}
+
+function filterAttendanceBatchOptions(val) {
+    attendanceBatchFilterSearchTerm = val.trim();
+    populateAttendanceFilterOptions();
+}
+
 function populateAttendanceFilterOptions() {
-    const batchSelect = document.getElementById('attendanceBatchFilter');
+    const optionsList = document.getElementById('attendanceBatchOptionsList');
     const courseSelect = document.getElementById('attendanceCourseFilter');
     const mentorSelect = document.getElementById('attendanceMentorFilter');
     const sessionSelect = document.getElementById('attendanceSessionFilter');
     availableMentors = Array.from(new Set(allSessions.map(session => session.mentorName).filter(Boolean))).sort();
 
-    if (batchSelect) {
-        const currentValue = batchSelect.value;
-        batchSelect.innerHTML = '<option value="">All Batches</option>';
-        Array.from(new Set(availableBatches)).sort().forEach(batch => {
-            const option = document.createElement('option');
-            option.value = batch;
-            option.textContent = batch;
-            batchSelect.appendChild(option);
-        });
-        batchSelect.value = currentValue;
+    if (optionsList) {
+        const sortedBatches = Array.from(new Set(availableBatches)).sort();
+        const filtered = sortedBatches.filter(batch => 
+            !attendanceBatchFilterSearchTerm || batch.toLowerCase().includes(attendanceBatchFilterSearchTerm.toLowerCase())
+        );
+
+        if (filtered.length === 0) {
+            optionsList.innerHTML = '<p style="padding: 8px 12px; color: #999; font-size: 12px;">No batches found</p>';
+        } else {
+            optionsList.innerHTML = filtered.map(batch => {
+                const isChecked = selectedAttendanceBatches.includes(batch);
+                return `
+                    <label class="multiselect-dropdown-option" onclick="event.stopPropagation();">
+                        <input type="checkbox" value="${escapeHtml(batch)}" ${isChecked ? 'checked' : ''} onchange="toggleAttendanceBatchFilterSelection(this)">
+                        <span>${escapeHtml(batch)}</span>
+                    </label>
+                `;
+            }).join('');
+        }
+        updateAttendanceBatchFilterLabel();
     }
 
     if (courseSelect) {
@@ -3050,6 +3098,14 @@ function getSelectedSessionBatches() {
     return Array.from(sessionBatchSelection);
 }
 
+// Global click event to close dropdown when clicking outside
+document.addEventListener('click', function(event) {
+    const dropdown = document.getElementById('attendanceBatchFilterDropdown');
+    if (dropdown && !dropdown.contains(event.target)) {
+        dropdown.classList.remove('active');
+    }
+});
+
 function toggleSessionBatchSelection(input) {
     const value = input?.value?.trim();
     if (!value) {
@@ -3067,6 +3123,7 @@ function populateSessionBatchOptions() {
     renderSessionBatchOptions();
 }
 
+// Existing renderSessionBatchOptions function
 function renderSessionBatchOptions(selectedBatches = null) {
     const container = document.getElementById('sessionBatchContainer');
     if (!container) {
@@ -3098,7 +3155,7 @@ function collectAttendanceFilters() {
         timeframe: document.getElementById('attendanceTimeframe')?.value || 'monthly',
         from: document.getElementById('attendanceFromDate')?.value || '',
         to: document.getElementById('attendanceToDate')?.value || '',
-        batch: document.getElementById('attendanceBatchFilter')?.value || '',
+        batch: selectedAttendanceBatches.join(','),
         course: document.getElementById('attendanceCourseFilter')?.value || '',
         mentorName: document.getElementById('attendanceMentorFilter')?.value || '',
         sessionId: document.getElementById('attendanceSessionFilter')?.value || '',
@@ -3131,7 +3188,6 @@ function resetAttendanceFilters() {
     const timeframe = document.getElementById('attendanceTimeframe');
     const fromDate = document.getElementById('attendanceFromDate');
     const toDate = document.getElementById('attendanceToDate');
-    const batch = document.getElementById('attendanceBatchFilter');
     const course = document.getElementById('attendanceCourseFilter');
     const mentor = document.getElementById('attendanceMentorFilter');
     const session = document.getElementById('attendanceSessionFilter');
@@ -3143,7 +3199,15 @@ function resetAttendanceFilters() {
     if (timeframe) timeframe.value = 'monthly';
     if (fromDate) { fromDate.value = ''; fromDate.disabled = true; }
     if (toDate) { toDate.value = ''; toDate.disabled = true; }
-    if (batch) batch.value = '';
+    
+    // Clear custom multiselect dropdown batches
+    selectedAttendanceBatches = [];
+    attendanceBatchFilterSearchTerm = '';
+    const searchInput = document.querySelector('#attendanceBatchFilterDropdown .multiselect-dropdown-search');
+    if (searchInput) searchInput.value = '';
+    updateAttendanceBatchFilterLabel();
+    populateAttendanceFilterOptions();
+
     if (course) course.value = '';
     if (mentor) mentor.value = '';
     if (session) session.value = '';
@@ -3160,8 +3224,11 @@ function getAttendanceDemoSessions(filters) {
     const search = (filters.search || '').toLowerCase();
 
     return attendanceDemoData.sessionSummaries.filter(session => {
-        if (filters.batch && session.batch !== filters.batch) {
-            return false;
+        if (filters.batch) {
+            const queryBatches = filters.batch.split(',').map(b => b.trim()).filter(Boolean);
+            if (queryBatches.length > 0 && !queryBatches.includes(session.batch)) {
+                return false;
+            }
         }
         if (filters.course && session.course !== filters.course) {
             return false;
@@ -3188,8 +3255,11 @@ function getAttendanceDemoRoster(filters) {
     const sortBy = document.getElementById('attendanceRosterSort')?.value || 'attendance-desc';
 
     let records = attendanceDemoData.roster.filter(student => {
-        if (filters.batch && student.batch !== filters.batch) {
-            return false;
+        if (filters.batch) {
+            const queryBatches = filters.batch.split(',').map(b => b.trim()).filter(Boolean);
+            if (queryBatches.length > 0 && !queryBatches.includes(student.batch)) {
+                return false;
+            }
         }
         if (filters.course && student.course !== filters.course) {
             return false;

@@ -2422,3 +2422,105 @@ html[data-theme="light"] .icms-logo-text {
         padding-right: 14px;
     }
 }
+
+/* Custom Multiselect Dropdown */
+.multiselect-dropdown {
+    position: relative;
+    user-select: none;
+    cursor: pointer;
+    background: white;
+}
+
+.multiselect-dropdown-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 14px;
+    background: white;
+    height: 100%;
+}
+
+.multiselect-dropdown-toggle:hover {
+    border-color: var(--primary-color);
+}
+
+.multiselect-dropdown.active .multiselect-dropdown-toggle {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.dropdown-icon {
+    font-size: 10px;
+    color: var(--text-secondary);
+    transition: transform 0.2s ease;
+}
+
+.multiselect-dropdown.active .dropdown-icon {
+    transform: rotate(180deg);
+}
+
+.multiselect-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: 250px;
+    max-height: 300px;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    flex-direction: column;
+}
+
+.multiselect-dropdown.active .multiselect-dropdown-menu {
+    display: flex;
+}
+
+.multiselect-dropdown-search-container {
+    padding: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.multiselect-dropdown-search {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.multiselect-dropdown-search:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.multiselect-dropdown-options-list {
+    overflow-y: auto;
+    flex: 1;
+    padding: 4px 0;
+}
+
+.multiselect-dropdown-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text-primary);
+    transition: background 0.2s ease;
+    cursor: pointer;
+}
+
+.multiselect-dropdown-option:hover {
+    background-color: var(--neutral-bg);
+}
+
+.multiselect-dropdown-option input[type="checkbox"] {
+    cursor: pointer;
+}
+

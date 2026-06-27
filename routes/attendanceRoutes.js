@@ -33,6 +33,14 @@ function escapeRegex(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function parseBatchQuery(batchQuery) {
+  if (!batchQuery) return [];
+  if (Array.isArray(batchQuery)) {
+    return batchQuery.map(b => normalizeText(b)).filter(Boolean);
+  }
+  return String(batchQuery).split(',').map(b => normalizeText(b)).filter(Boolean);
+}
+
 function getSessionBatches(session) {
   if (Array.isArray(session?.batches) && session.batches.length > 0) {
     return session.batches.map(batch => normalizeText(batch)).filter(Boolean);
@@ -88,8 +96,12 @@ function resolveWindow(query = {}) {
 
 function buildStudentQuery(query = {}) {
   const studentQuery = {};
-  if (query.batch) {
-    studentQuery.$or = [{ batch: query.batch }, { batches: query.batch }];
+  const batches = parseBatchQuery(query.batch);
+  if (batches.length > 0) {
+    studentQuery.$or = [
+      { batch: { $in: batches } },
+      { batches: { $in: batches } }
+    ];
   }
   if (query.course) {
     studentQuery.course = query.course;
@@ -113,8 +125,9 @@ function buildAttendanceMatch(query = {}, window = {}) {
     if (window.start) attendanceMatch.attendedAt.$gte = window.start;
     if (window.end) attendanceMatch.attendedAt.$lte = window.end;
   }
-  if (query.batch) {
-    attendanceMatch.batch = query.batch;
+  const batches = parseBatchQuery(query.batch);
+  if (batches.length > 0) {
+    attendanceMatch.batch = { $in: batches };
   }
   if (query.course) {
     attendanceMatch.course = query.course;
@@ -454,8 +467,12 @@ async function buildAttendanceSnapshot(query = {}) {
   const attendanceMatch = buildAttendanceMatch(query, window);
 
   const sessionQuery = {};
-  if (query.batch) {
-    sessionQuery.$or = [{ batch: query.batch }, { batches: query.batch }];
+  const queryBatches = parseBatchQuery(query.batch);
+  if (queryBatches.length > 0) {
+    sessionQuery.$or = [
+      { batch: { $in: queryBatches } },
+      { batches: { $in: queryBatches } }
+    ];
   }
   if (query.course) {
     sessionQuery.courses = query.course;
@@ -480,8 +497,12 @@ async function buildAttendanceSnapshot(query = {}) {
   ]);
 
   const filteredSessions = sessions.filter((session) => {
-    if (query.batch && !getSessionBatches(session).includes(query.batch)) {
-      return false;
+    if (queryBatches.length > 0) {
+      const sessionBatches = getSessionBatches(session);
+      const hasOverlap = sessionBatches.some(b => queryBatches.includes(b));
+      if (!hasOverlap) {
+        return false;
+      }
     }
 
     if (query.course) {
