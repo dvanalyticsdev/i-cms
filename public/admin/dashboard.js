@@ -19,10 +19,11 @@ let deleteTargetCourseId = null;
 let allStudents = [];
 let filteredStudents = [];
 let studentPageMeta = { page: 1, limit: 20, total: 0, totalPages: 1 };
-let studentSearchQuery = { search: '', course: '', paymentStatus: '' };
+let studentSearchQuery = { search: '', course: '', batches: [], year: '', paymentStatus: '', feeStatusException: '' };
 let studentSearchTimer = null;
 let deleteTargetLmsId = null;
 let availableBatches = [];
+let availableStudentYears = [];
 let studentBatchSelection = new Set();
 let allIssues = [];
 let issueSearchTimer = null;
@@ -336,6 +337,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadMockInterviewIds(); // Load mock interview IDs
     loadStudents(1); // Load students (page 1)
     loadStudentBatches(); // Load student batches for selection dropdowns
+    loadStudentYears(); // Load student years for filter dropdown
     loadIssues(); // Load issue reports
     loadAttendanceInsights();
     loadAttendanceRoster();
@@ -2410,9 +2412,26 @@ async function loadStudents(page = 1) {
         studentPageMeta.page = page;
         const searchVal = studentSearchQuery.search || '';
         const courseVal = studentSearchQuery.course || '';
+        const batchVals = Array.isArray(studentSearchQuery.batches) ? studentSearchQuery.batches : [];
+        const yearVal = studentSearchQuery.year || '';
         const paymentStatusVal = studentSearchQuery.paymentStatus || '';
+        const feeStatusExceptionVal = studentSearchQuery.feeStatusException || '';
 
-        const url = `${API_BASE_URL}/students?page=${page}&limit=${studentPageMeta.limit}&search=${encodeURIComponent(searchVal)}&course=${encodeURIComponent(courseVal)}&paymentStatus=${encodeURIComponent(paymentStatusVal)}`;
+        const params = new URLSearchParams({
+            page: String(page),
+            limit: String(studentPageMeta.limit),
+            search: searchVal,
+            course: courseVal,
+            year: yearVal,
+            paymentStatus: paymentStatusVal,
+            feeStatusException: feeStatusExceptionVal
+        });
+
+        if (batchVals.length > 0) {
+            params.set('batches', batchVals.join(','));
+        }
+
+        const url = `${API_BASE_URL}/students?${params.toString()}`;
         
         const response = await fetch(url, {
             headers: {
@@ -2465,12 +2484,39 @@ async function loadStudentBatches() {
         const data = await response.json();
         if (data.success) {
             availableBatches = data.batches || [];
+            populateStudentBatchFilter();
             populateAttendanceFilterOptions();
             populateSessionBatchOptions();
             renderStudentBatchOptions();
         }
     } catch (error) {
         console.error('Error loading student batches:', error);
+    }
+}
+
+/**
+ * Load student years for filter dropdown
+ */
+async function loadStudentYears() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/students/years`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (data.success) {
+            availableStudentYears = data.years || [];
+            populateStudentYearFilter();
+        }
+    } catch (error) {
+        console.error('Error loading student years:', error);
     }
 }
 
@@ -2780,6 +2826,54 @@ function populateStudentCourseFilter() {
 }
 
 /**
+ * Populate batch filter dropdown
+ */
+function populateStudentBatchFilter() {
+    const filterSelect = document.getElementById('studentBatchFilter');
+    if (!filterSelect) return;
+
+    const selectedBatches = new Set(studentSearchQuery.batches || []);
+    const batches = Array.from(new Set(availableBatches)).sort((left, right) => left.localeCompare(right));
+
+    filterSelect.innerHTML = '';
+
+    if (batches.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No batches available';
+        option.disabled = true;
+        filterSelect.appendChild(option);
+        return;
+    }
+
+    batches.forEach(batch => {
+        const option = document.createElement('option');
+        option.value = batch;
+        option.textContent = batch;
+        option.selected = selectedBatches.has(batch);
+        filterSelect.appendChild(option);
+    });
+}
+
+/**
+ * Populate year filter dropdown
+ */
+function populateStudentYearFilter() {
+    const filterSelect = document.getElementById('studentYearFilter');
+    if (!filterSelect) return;
+
+    filterSelect.innerHTML = '<option value="">All Years</option>';
+    availableStudentYears.forEach(year => {
+        const option = document.createElement('option');
+        option.value = year;
+        option.textContent = year;
+        filterSelect.appendChild(option);
+    });
+
+    filterSelect.value = studentSearchQuery.year || '';
+}
+
+/**
  * Filter and search students
  */
 function filterAndSearchStudents() {
@@ -2790,11 +2884,19 @@ function filterAndSearchStudents() {
     studentSearchTimer = setTimeout(() => {
         const searchTerm = document.getElementById('studentSearch').value.trim();
         const selectedCourse = document.getElementById('studentCourseFilter').value;
+        const selectedBatches = Array.from(document.getElementById('studentBatchFilter').selectedOptions || [])
+            .map(option => option.value)
+            .filter(Boolean);
+        const selectedYear = document.getElementById('studentYearFilter').value;
         const selectedPaymentStatus = document.getElementById('studentPaymentFilter').value;
+        const selectedFeeStatusException = document.getElementById('studentFeeExceptionFilter').value;
 
         studentSearchQuery.search = searchTerm;
         studentSearchQuery.course = selectedCourse;
+        studentSearchQuery.batches = selectedBatches;
+        studentSearchQuery.year = selectedYear;
         studentSearchQuery.paymentStatus = selectedPaymentStatus;
+        studentSearchQuery.feeStatusException = selectedFeeStatusException;
 
         loadStudents(1);
     }, 250);
@@ -2806,10 +2908,18 @@ function filterAndSearchStudents() {
 function resetStudentFilters() {
     document.getElementById('studentSearch').value = '';
     document.getElementById('studentCourseFilter').value = '';
+    Array.from(document.getElementById('studentBatchFilter').options || []).forEach(option => {
+        option.selected = false;
+    });
+    document.getElementById('studentYearFilter').value = '';
     document.getElementById('studentPaymentFilter').value = '';
+    document.getElementById('studentFeeExceptionFilter').value = '';
     studentSearchQuery.search = '';
     studentSearchQuery.course = '';
+    studentSearchQuery.batches = [];
+    studentSearchQuery.year = '';
     studentSearchQuery.paymentStatus = '';
+    studentSearchQuery.feeStatusException = '';
     loadStudents(1);
 }
 

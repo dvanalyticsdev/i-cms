@@ -527,12 +527,39 @@
                         <option value="">All Courses</option>
                     </select>
                 </div>
+                <div class="table-toolbar-select student-filter-select student-filter-select-wide">
+                    <select
+                        id="studentBatchFilter"
+                        class="form-input student-filter-multiselect"
+                        multiple
+                        size="4"
+                        onchange="filterAndSearchStudents()"
+                        title="Hold Ctrl or Cmd to select multiple batches"
+                    >
+                    </select>
+                </div>
+                <div class="table-toolbar-select student-filter-select">
+                    <select
+                        id="studentYearFilter"
+                        class="form-input"
+                        onchange="filterAndSearchStudents()"
+                    >
+                        <option value="">All Years</option>
+                    </select>
+                </div>
                 <div class="table-toolbar-select student-filter-select">
                     <select id="studentPaymentFilter" class="form-input" onchange="filterAndSearchStudents()">
                         <option value="">All Payments</option>
                         <option value="DEFAULT">Default</option>
                         <option value="FULLY PAID">Fully Paid</option>
                         <option value="PENDING">Pending</option>
+                    </select>
+                </div>
+                <div class="table-toolbar-select student-filter-select">
+                    <select id="studentFeeExceptionFilter" class="form-input" onchange="filterAndSearchStudents()">
+                        <option value="">All Fee Exceptions</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
                     </select>
                 </div>
                 <button class="btn btn-secondary" onclick="resetStudentFilters()">

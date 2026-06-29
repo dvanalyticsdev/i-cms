@@ -49,6 +49,7 @@ function parseBatchNames(batches) {
   return Array.from(
     new Set(
       values
+        .flatMap(batch => normalizeText(batch).split(','))
         .map(batch => normalizeText(batch))
         .filter(Boolean)
     )
@@ -1302,6 +1303,24 @@ router.get('/students/batches', authMiddleware, async (req, res) => {
 });
 
 /**
+ * GET /api/admin/students/years
+ */
+router.get('/students/years', authMiddleware, async (req, res) => {
+  try {
+    const students = await Student.find({}).select('year').lean();
+    const years = Array.from(new Set(
+      students
+        .map(student => normalizeText(student?.year))
+        .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+    return res.status(200).json({ success: true, years });
+  } catch (error) {
+    console.error('Error retrieving student years:', error.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
  * GET /api/admin/students
  */
 router.get('/students', authMiddleware, async (req, res) => {
@@ -1309,31 +1328,57 @@ router.get('/students', authMiddleware, async (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
     const search = req.query.search ? String(req.query.search).trim() : '';
-    const course = req.query.course ? String(req.query.course).trim() : '';
+    const course = normalizeText(req.query.course);
+    const batchFilters = parseBatchNames(req.query.batches);
+    const year = normalizeText(req.query.year);
     const paymentStatus = req.query.paymentStatus ? normalizePaymentStatus(req.query.paymentStatus) : '';
-
-    const query = {};
+    const feeStatusExceptionFilter = normalizeText(req.query.feeStatusException).toLowerCase();
+    const conditions = [];
 
     if (course) {
-      query.course = course;
+      conditions.push({ course });
+    }
+
+    if (batchFilters.length > 0) {
+      conditions.push({
+        $or: [
+          { batch: { $in: batchFilters } },
+          { batches: { $in: batchFilters } }
+        ]
+      });
+    }
+
+    if (year) {
+      conditions.push({ year });
     }
 
     if (paymentStatus) {
-      query.paymentStatus = paymentStatus;
+      conditions.push({ paymentStatus });
+    }
+
+    if (feeStatusExceptionFilter === 'yes') {
+      conditions.push({ feeStatusException: true });
+    } else if (feeStatusExceptionFilter === 'no') {
+      conditions.push({ feeStatusException: false });
     }
 
     if (search) {
       const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      query.$or = [
+      conditions.push({
+        $or: [
         { lmsId: new RegExp(escapedSearch, 'i') },
         { name: new RegExp(escapedSearch, 'i') },
         { batch: new RegExp(escapedSearch, 'i') },
         { batches: new RegExp(escapedSearch, 'i') },
         { mobile: new RegExp(escapedSearch, 'i') },
         { emailId: new RegExp(escapedSearch, 'i') },
-        { paymentStatus: new RegExp(escapedSearch, 'i') }
-      ];
+        { paymentStatus: new RegExp(escapedSearch, 'i') },
+        { year: new RegExp(escapedSearch, 'i') }
+      ]
+      });
     }
+
+    const query = conditions.length > 0 ? { $and: conditions } : {};
 
     const total = await Student.countDocuments(query);
     const students = await Student.find(query)
