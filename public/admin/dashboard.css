@@ -2092,10 +2092,8 @@ body.nav-open {
     min-width: 220px;
 }
 
-.student-filter-multiselect {
-    min-height: 120px;
-    padding-top: 8px;
-    padding-bottom: 8px;
+.student-filter-select-wide .multiselect-dropdown-menu {
+    width: 100%;
 }
 
 .table-container,

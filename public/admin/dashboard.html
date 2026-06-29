@@ -527,16 +527,18 @@
                         <option value="">All Courses</option>
                     </select>
                 </div>
-                <div class="table-toolbar-select student-filter-select student-filter-select-wide">
-                    <select
-                        id="studentBatchFilter"
-                        class="form-input student-filter-multiselect"
-                        multiple
-                        size="4"
-                        onchange="filterAndSearchStudents()"
-                        title="Hold Ctrl or Cmd to select multiple batches"
-                    >
-                    </select>
+                <div class="multiselect-dropdown table-toolbar-select student-filter-select student-filter-select-wide" id="studentBatchFilterDropdown">
+                    <div class="multiselect-dropdown-toggle" onclick="event.stopPropagation(); toggleStudentBatchFilterDropdown();">
+                        <span class="multiselect-dropdown-label">All Batches</span>
+                        <i class="dropdown-icon">▼</i>
+                    </div>
+                    <div class="multiselect-dropdown-menu" onclick="event.stopPropagation();">
+                        <div class="multiselect-dropdown-search-container">
+                            <input type="text" placeholder="Search batches..." class="multiselect-dropdown-search" oninput="filterStudentBatchOptions(this.value)">
+                        </div>
+                        <div class="multiselect-dropdown-options-list" id="studentBatchOptionsList">
+                        </div>
+                    </div>
                 </div>
                 <div class="table-toolbar-select student-filter-select">
                     <select

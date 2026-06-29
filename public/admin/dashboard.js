@@ -21,6 +21,7 @@ let filteredStudents = [];
 let studentPageMeta = { page: 1, limit: 20, total: 0, totalPages: 1 };
 let studentSearchQuery = { search: '', course: '', batches: [], year: '', paymentStatus: '', feeStatusException: '' };
 let studentSearchTimer = null;
+let studentBatchFilterSearchTerm = '';
 let deleteTargetLmsId = null;
 let availableBatches = [];
 let availableStudentYears = [];
@@ -2829,30 +2830,35 @@ function populateStudentCourseFilter() {
  * Populate batch filter dropdown
  */
 function populateStudentBatchFilter() {
-    const filterSelect = document.getElementById('studentBatchFilter');
-    if (!filterSelect) return;
-
     const selectedBatches = new Set(studentSearchQuery.batches || []);
     const batches = Array.from(new Set(availableBatches)).sort((left, right) => left.localeCompare(right));
-
-    filterSelect.innerHTML = '';
+    const optionsList = document.getElementById('studentBatchOptionsList');
+    if (!optionsList) return;
 
     if (batches.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No batches available';
-        option.disabled = true;
-        filterSelect.appendChild(option);
+        optionsList.innerHTML = '<p style="padding: 8px 12px; color: #999; font-size: 12px;">No batches available</p>';
+        updateStudentBatchFilterLabel();
         return;
     }
 
-    batches.forEach(batch => {
-        const option = document.createElement('option');
-        option.value = batch;
-        option.textContent = batch;
-        option.selected = selectedBatches.has(batch);
-        filterSelect.appendChild(option);
-    });
+    const filtered = batches.filter(batch =>
+        !studentBatchFilterSearchTerm || batch.toLowerCase().includes(studentBatchFilterSearchTerm.toLowerCase())
+    );
+
+    if (filtered.length === 0) {
+        optionsList.innerHTML = '<p style="padding: 8px 12px; color: #999; font-size: 12px;">No batches found</p>';
+        updateStudentBatchFilterLabel();
+        return;
+    }
+
+    optionsList.innerHTML = filtered.map(batch => `
+        <label class="multiselect-dropdown-option" onclick="event.stopPropagation();">
+            <input type="checkbox" value="${escapeHtml(batch)}" ${selectedBatches.has(batch) ? 'checked' : ''} onchange="toggleStudentBatchFilterSelection(this)">
+            <span>${escapeHtml(batch)}</span>
+        </label>
+    `).join('');
+
+    updateStudentBatchFilterLabel();
 }
 
 /**
@@ -2884,9 +2890,7 @@ function filterAndSearchStudents() {
     studentSearchTimer = setTimeout(() => {
         const searchTerm = document.getElementById('studentSearch').value.trim();
         const selectedCourse = document.getElementById('studentCourseFilter').value;
-        const selectedBatches = Array.from(document.getElementById('studentBatchFilter').selectedOptions || [])
-            .map(option => option.value)
-            .filter(Boolean);
+        const selectedBatches = Array.isArray(studentSearchQuery.batches) ? studentSearchQuery.batches : [];
         const selectedYear = document.getElementById('studentYearFilter').value;
         const selectedPaymentStatus = document.getElementById('studentPaymentFilter').value;
         const selectedFeeStatusException = document.getElementById('studentFeeExceptionFilter').value;
@@ -2908,9 +2912,11 @@ function filterAndSearchStudents() {
 function resetStudentFilters() {
     document.getElementById('studentSearch').value = '';
     document.getElementById('studentCourseFilter').value = '';
-    Array.from(document.getElementById('studentBatchFilter').options || []).forEach(option => {
-        option.selected = false;
-    });
+    studentBatchFilterSearchTerm = '';
+    const batchSearchInput = document.querySelector('#studentBatchFilterDropdown .multiselect-dropdown-search');
+    if (batchSearchInput) {
+        batchSearchInput.value = '';
+    }
     document.getElementById('studentYearFilter').value = '';
     document.getElementById('studentPaymentFilter').value = '';
     document.getElementById('studentFeeExceptionFilter').value = '';
@@ -2920,7 +2926,51 @@ function resetStudentFilters() {
     studentSearchQuery.year = '';
     studentSearchQuery.paymentStatus = '';
     studentSearchQuery.feeStatusException = '';
+    populateStudentBatchFilter();
     loadStudents(1);
+}
+
+function toggleStudentBatchFilterDropdown() {
+    const dropdown = document.getElementById('studentBatchFilterDropdown');
+    if (!dropdown) return;
+    dropdown.classList.toggle('active');
+}
+
+function toggleStudentBatchFilterSelection(checkbox) {
+    const value = checkbox?.value?.trim();
+    if (!value) {
+        return;
+    }
+
+    const current = new Set(studentSearchQuery.batches || []);
+    if (checkbox.checked) {
+        current.add(value);
+    } else {
+        current.delete(value);
+    }
+
+    studentSearchQuery.batches = Array.from(current).sort((left, right) => left.localeCompare(right));
+    updateStudentBatchFilterLabel();
+    filterAndSearchStudents();
+}
+
+function updateStudentBatchFilterLabel() {
+    const label = document.querySelector('#studentBatchFilterDropdown .multiselect-dropdown-label');
+    if (!label) return;
+
+    const selectedBatches = Array.isArray(studentSearchQuery.batches) ? studentSearchQuery.batches : [];
+    if (selectedBatches.length === 0) {
+        label.textContent = 'All Batches';
+    } else if (selectedBatches.length === 1) {
+        label.textContent = selectedBatches[0];
+    } else {
+        label.textContent = `${selectedBatches.length} Batches Selected`;
+    }
+}
+
+function filterStudentBatchOptions(value) {
+    studentBatchFilterSearchTerm = value.trim();
+    populateStudentBatchFilter();
 }
 
 /**
@@ -3210,9 +3260,14 @@ function getSelectedSessionBatches() {
 
 // Global click event to close dropdown when clicking outside
 document.addEventListener('click', function(event) {
-    const dropdown = document.getElementById('attendanceBatchFilterDropdown');
-    if (dropdown && !dropdown.contains(event.target)) {
-        dropdown.classList.remove('active');
+    const attendanceDropdown = document.getElementById('attendanceBatchFilterDropdown');
+    if (attendanceDropdown && !attendanceDropdown.contains(event.target)) {
+        attendanceDropdown.classList.remove('active');
+    }
+
+    const studentDropdown = document.getElementById('studentBatchFilterDropdown');
+    if (studentDropdown && !studentDropdown.contains(event.target)) {
+        studentDropdown.classList.remove('active');
     }
 });
 
