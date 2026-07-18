@@ -13,6 +13,7 @@ const {
   recordSessionJoin
 } = require('../utils/attendanceTracker');
 const { mapRulesByKey, isClassAccessible } = require('../utils/classAccess');
+const { getAutomatedSessionState } = require('../utils/sessionAutomation');
 
 function getSessionBatches(session) {
   if (Array.isArray(session?.batches) && session.batches.length > 0) {
@@ -50,6 +51,23 @@ function resolveStudentBatchForSession(student, session) {
   const sessionBatches = getSessionBatches(session);
   const matchedBatch = studentBatches.find(batch => sessionBatches.includes(batch));
   return matchedBatch || studentBatches[0] || '';
+}
+
+function withEffectiveSessionStatus(session, now = new Date()) {
+  const automationState = getAutomatedSessionState(session, now);
+
+  return {
+    ...session,
+    status: automationState.effectiveStatus,
+    automation: {
+      enabled: automationState.enabled,
+      activeWindow: automationState.isActiveWindow,
+      scheduledStartAt: automationState.startAt,
+      scheduledEndAt: automationState.endAt,
+      activationDurationMinutes: automationState.durationMinutes,
+      inactiveReason: automationState.inactiveReason
+    }
+  };
 }
 
 /**
@@ -97,6 +115,7 @@ router.get('/class-sessions', async (req, res) => {
         .sort({ updatedAt: -1 })
         .lean();
       
+      const now = new Date();
       const filteredSessions = allSessions.filter(session => {
         if (studentRecord && !hasStudentBatchAccess(studentRecord, session)) {
           return false;
@@ -118,7 +137,7 @@ router.get('/class-sessions', async (req, res) => {
       return res.status(200).json({
         success: true,
         message: 'Class sessions retrieved successfully',
-        sessions: filteredSessions,
+        sessions: filteredSessions.map(session => withEffectiveSessionStatus(session, now)),
         total: filteredSessions.length,
         studentCourse: studentCourse,
         studentBatch: studentBatch,
@@ -130,10 +149,11 @@ router.get('/class-sessions', async (req, res) => {
         .sort({ updatedAt: -1 })
         .lean();
 
+      const now = new Date();
       return res.status(200).json({
         success: true,
         message: 'Class sessions retrieved successfully',
-        sessions,
+        sessions: sessions.map(session => withEffectiveSessionStatus(session, now)),
         total: sessions.length
       });
     }
@@ -170,10 +190,18 @@ router.post('/join-session', async (req, res) => {
       });
     }
 
-    if (session.status === 'off') {
+    const effectiveSession = withEffectiveSessionStatus(session, new Date());
+
+    if (effectiveSession.status === 'off') {
+      const inactiveMessage = effectiveSession.automation?.inactiveReason === 'before_start'
+        ? 'Session is scheduled but has not started yet'
+        : effectiveSession.automation?.inactiveReason === 'ended'
+          ? 'This scheduled session window has ended'
+          : 'Session is currently inactive';
+
       return res.status(403).json({
         success: false,
-        message: 'Session is currently inactive',
+        message: inactiveMessage,
         sessionInactive: true
       });
     }
@@ -291,9 +319,10 @@ router.post('/join-session', async (req, res) => {
         sessionId: session.sessionId,
         title: session.title,
         meetingNumber: session.meetingNumber,
-        status: session.status,
+        status: effectiveSession.status,
         mentorName: session.mentorName || '',
-        className: session.className || ''
+        className: session.className || '',
+        automation: effectiveSession.automation
       },
       zoom: zoomSignature
     });
@@ -348,10 +377,16 @@ router.post('/attendance/start', async (req, res) => {
     const joinedAt = new Date();
     const attendanceDate = formatAttendanceDate(joinedAt);
 
-    if (session.status === 'off') {
+    const effectiveSession = withEffectiveSessionStatus(session, joinedAt);
+
+    if (effectiveSession.status === 'off') {
       return res.status(403).json({
         success: false,
-        message: 'Session is currently inactive'
+        message: effectiveSession.automation?.inactiveReason === 'before_start'
+          ? 'Session attendance has not opened yet'
+          : effectiveSession.automation?.inactiveReason === 'ended'
+            ? 'Session attendance is closed because the scheduled window has ended'
+            : 'Session is currently inactive'
       });
     }
 

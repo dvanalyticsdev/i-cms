@@ -14,6 +14,7 @@ const { logSessionActivity, getTimestampParts } = require('../utils/sessionLogge
 const { sanitizeLmsId } = require('../utils/studentValidation');
 const { closeAttendanceForActiveSession, endActiveSession } = require('../utils/attendanceTracker');
 const { normalizePaymentStatus, normalizeFeeStatusException } = require('../utils/classAccess');
+const { getAutomatedSessionState, toValidDate } = require('../utils/sessionAutomation');
 const CLASS_ACCESS_PAYMENT_STATUSES = ['DEFAULT', 'FULLY PAID', 'PENDING'];
 const SESSION_LOG_ALLOWED_ACTIONS = ['Created Session', 'Updated Session', 'Session Status Updated', 'Deleted Session'];
 const { syncWorkbookData } = require('../utils/workbookSync');
@@ -22,6 +23,15 @@ const crypto = require('crypto');
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function parseBooleanInput(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const normalized = normalizeText(value).toLowerCase();
+  return ['true', '1', 'yes', 'on'].includes(normalized);
 }
 
 function ensureAdminRole(req, res) {
@@ -94,6 +104,40 @@ function normalizePosterImage(posterImage) {
   }
 
   return `data:image/${sanitizedMimeType};base64,${base64Payload}`;
+}
+
+function buildSessionAutomationFields(payload = {}) {
+  const automationEnabled = parseBooleanInput(payload.automationEnabled);
+
+  if (!automationEnabled) {
+    return {
+      automationEnabled: false,
+      scheduledStartAt: null,
+      scheduledEndAt: null,
+      activationDurationMinutes: null
+    };
+  }
+
+  const scheduledStartAt = toValidDate(payload.scheduledStartAt);
+  if (!scheduledStartAt) {
+    const error = new Error('A valid automation start date and time is required');
+    error.status = 400;
+    throw error;
+  }
+
+  const activationDurationMinutes = Number(payload.activationDurationMinutes);
+  if (!Number.isInteger(activationDurationMinutes) || activationDurationMinutes < 1 || activationDurationMinutes > 1440) {
+    const error = new Error('Automation duration must be a whole number between 1 and 1440 minutes');
+    error.status = 400;
+    throw error;
+  }
+
+  return {
+    automationEnabled: true,
+    scheduledStartAt,
+    scheduledEndAt: new Date(scheduledStartAt.getTime() + (activationDurationMinutes * 60000)),
+    activationDurationMinutes
+  };
 }
 
 function escapeCsvValue(value) {
@@ -479,6 +523,7 @@ router.post('/session', authMiddleware, async (req, res) => {
     const normalizedMentorName = normalizeText(mentorName);
     const normalizedClassName = normalizeText(className);
     const normalizedPosterImage = normalizePosterImage(posterImage);
+    const automationFields = buildSessionAutomationFields(req.body);
 
     if (!title || !meetingNumber || !passcode || normalizedBatches.length === 0 || !normalizedMentorName || !normalizedClassName) {
       return res.status(400).json({ success: false, message: 'Title, Meeting Number, Passcode, at least one Batch, Mentor Name, and Class Name are required' });
@@ -494,7 +539,7 @@ router.post('/session', authMiddleware, async (req, res) => {
 
     const sessionId = `SESSION_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-    const newSession = new ClassSession({
+    const draftSession = {
       sessionId,
       title: title.trim(),
       meetingNumber: sanitizedMeetingNumber,
@@ -506,9 +551,14 @@ router.post('/session', authMiddleware, async (req, res) => {
       batch: normalizedBatches[0],
       batches: normalizedBatches,
       courses: normalizedCourses,
-      status: 'on',
+      status: automationFields.automationEnabled
+        ? getAutomatedSessionState({ status: 'off', ...automationFields }).effectiveStatus
+        : 'on',
+      ...automationFields,
       createdBy: req.admin.username
-    });
+    };
+
+    const newSession = new ClassSession(draftSession);
 
     await newSession.save();
 
@@ -572,7 +622,7 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
     }
 
     const { title, meetingNumber, passcode, description, courses, batch, batches, mentorName, className, posterImage } = req.body;
-    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined && batches === undefined && mentorName === undefined && className === undefined && posterImage === undefined) {
+    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined && batches === undefined && mentorName === undefined && className === undefined && posterImage === undefined && req.body.automationEnabled === undefined && req.body.scheduledStartAt === undefined && req.body.activationDurationMinutes === undefined) {
       return res.status(400).json({ success: false, message: 'At least one field must be provided for update' });
     }
 
@@ -621,8 +671,35 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
       updateData.courses = normalizedCourses;
     }
 
+    if (req.body.automationEnabled !== undefined || req.body.scheduledStartAt !== undefined || req.body.activationDurationMinutes !== undefined) {
+      const automationFields = buildSessionAutomationFields({
+        automationEnabled: req.body.automationEnabled,
+        scheduledStartAt: req.body.scheduledStartAt !== undefined ? req.body.scheduledStartAt : existingSession.scheduledStartAt,
+        activationDurationMinutes: req.body.activationDurationMinutes !== undefined ? req.body.activationDurationMinutes : existingSession.activationDurationMinutes
+      });
+
+      Object.assign(updateData, automationFields);
+      updateData.status = automationFields.automationEnabled
+        ? getAutomatedSessionState({ ...existingSession, ...updateData }).effectiveStatus
+        : existingSession.status;
+    }
+
     const updatedSession = await ClassSession.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true });
     if (!updatedSession) return res.status(404).json({ success: false, message: 'Session not found' });
+
+    if (existingSession.status === 'on' && updatedSession.status === 'off') {
+      const activeSessions = await ActiveSession.find({
+        status: 'active',
+        classSessionId: updatedSession.sessionId
+      });
+
+      for (const activeSession of activeSessions) {
+        await closeAttendanceForActiveSession(activeSession, new Date(), {
+          reason: updatedSession.automationEnabled ? 'scheduled_window_end' : 'admin_closed',
+          finalizedBy: req.admin.username || 'admin'
+        });
+      }
+    }
 
     await logSessionActivity({
       sessionId: updatedSession.sessionId,
@@ -658,7 +735,14 @@ router.patch('/session/:id/status', authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Status must be "on" or "off"' });
     }
 
-    const updatedSession = await ClassSession.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    const existingSession = await ClassSession.findById(req.params.id).lean();
+    if (!existingSession) return res.status(404).json({ success: false, message: 'Session not found' });
+
+    const updateFields = existingSession.automationEnabled
+      ? { status, automationEnabled: false }
+      : { status };
+
+    const updatedSession = await ClassSession.findByIdAndUpdate(req.params.id, updateFields, { new: true });
     if (!updatedSession) return res.status(404).json({ success: false, message: 'Session not found' });
 
     if (status === 'off') {
@@ -681,10 +765,16 @@ router.patch('/session/:id/status', authMiddleware, async (req, res) => {
       userName: req.admin.username,
       actionPerformed: 'Session Status Updated',
       status: 'Success',
-      remarks: `Session status changed to ${status.toUpperCase()}`
+      remarks: existingSession.automationEnabled
+        ? `Session status changed to ${status.toUpperCase()} and automation was disabled`
+        : `Session status changed to ${status.toUpperCase()}`
     });
 
-    return res.status(200).json({ success: true, message: `Session status updated to ${status}`, session: updatedSession });
+    const message = existingSession.automationEnabled
+      ? `Session status updated to ${status} and automation was disabled`
+      : `Session status updated to ${status}`;
+
+    return res.status(200).json({ success: true, message, session: updatedSession });
   } catch (error) {
     console.error('Error updating session status:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });

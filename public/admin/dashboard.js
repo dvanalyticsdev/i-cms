@@ -295,6 +295,110 @@ function handleSessionPosterChange(event) {
     reader.readAsDataURL(file);
 }
 
+function formatDateTimeLocalInput(value) {
+    if (!value) {
+        return '';
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    const timezoneOffsetMs = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 16);
+}
+
+function formatSessionDateTime(value) {
+    if (!value) {
+        return '';
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    return date.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function updateSessionAutomationPreview() {
+    const preview = document.getElementById('sessionAutomationPreview');
+    const enabled = document.getElementById('sessionAutomationEnabled')?.checked;
+    const startValue = document.getElementById('sessionScheduledStartAt')?.value || '';
+    const durationValue = Number(document.getElementById('sessionActivationDurationMinutes')?.value || 0);
+
+    if (!preview) {
+        return;
+    }
+
+    if (!enabled) {
+        preview.textContent = 'Set a start time and duration to preview the automatic activation window.';
+        return;
+    }
+
+    if (!startValue || !Number.isFinite(durationValue) || durationValue <= 0) {
+        preview.textContent = 'Choose a valid start time and duration to schedule the automatic join window.';
+        return;
+    }
+
+    const startAt = new Date(startValue);
+    if (Number.isNaN(startAt.getTime())) {
+        preview.textContent = 'Choose a valid start time and duration to schedule the automatic join window.';
+        return;
+    }
+
+    const endAt = new Date(startAt.getTime() + (durationValue * 60000));
+    preview.textContent = `Students can join automatically from ${formatSessionDateTime(startAt)} until ${formatSessionDateTime(endAt)}.`;
+}
+
+function setSessionAutomationState(isEnabled) {
+    const fields = document.getElementById('sessionAutomationFields');
+    const startInput = document.getElementById('sessionScheduledStartAt');
+    const durationInput = document.getElementById('sessionActivationDurationMinutes');
+
+    if (fields) {
+        fields.classList.toggle('hidden', !isEnabled);
+    }
+
+    if (startInput) {
+        startInput.disabled = !isEnabled;
+    }
+
+    if (durationInput) {
+        durationInput.disabled = !isEnabled;
+    }
+
+    updateSessionAutomationPreview();
+}
+
+function handleSessionAutomationToggle() {
+    const isEnabled = document.getElementById('sessionAutomationEnabled')?.checked;
+    setSessionAutomationState(Boolean(isEnabled));
+}
+
+function formatSessionAutomationSummary(session) {
+    if (!session?.automationEnabled) {
+        return 'Manual control';
+    }
+
+    const startLabel = formatSessionDateTime(session.scheduledStartAt);
+    const endLabel = formatSessionDateTime(session.scheduledEndAt);
+    const durationLabel = Number(session.activationDurationMinutes || 0);
+
+    if (!startLabel || !endLabel || durationLabel <= 0) {
+        return 'Scheduled automation configured';
+    }
+
+    return `Auto window: ${startLabel} to ${endLabel} (${durationLabel} min)`;
+}
+
 // ====================================
 // INITIALIZATION
 // ====================================
@@ -766,6 +870,21 @@ function setupEventListeners() {
         posterInput.addEventListener('change', handleSessionPosterChange);
     }
 
+    const automationToggle = document.getElementById('sessionAutomationEnabled');
+    if (automationToggle) {
+        automationToggle.addEventListener('change', handleSessionAutomationToggle);
+    }
+
+    const automationStartInput = document.getElementById('sessionScheduledStartAt');
+    if (automationStartInput) {
+        automationStartInput.addEventListener('input', updateSessionAutomationPreview);
+    }
+
+    const automationDurationInput = document.getElementById('sessionActivationDurationMinutes');
+    if (automationDurationInput) {
+        automationDurationInput.addEventListener('input', updateSessionAutomationPreview);
+    }
+
     setupClassAccessScrolling();
     setupAttendanceDetailScrolling();
 
@@ -1180,12 +1299,13 @@ function renderSessions() {
         const courseFullText = assignedCourses.length > 0
             ? escapeHtml(courseSummary.fullText)
             : 'All Courses';
+        const automationSummary = escapeHtml(formatSessionAutomationSummary(session));
 
         return `
-        <tr>
-            <td>${escapeHtml(session.title)}</td>
-            <td>${renderCodeChip(session.meetingNumber)}</td>
-            <td class="session-access-cell">
+        <tr class="session-table-row">
+            <td data-label="Title">${escapeHtml(session.title)}</td>
+            <td data-label="Meeting ID">${renderCodeChip(session.meetingNumber)}</td>
+            <td data-label="Class Access" class="session-access-cell">
                 <div class="session-access-primary">${className}</div>
                 <div class="session-access-meta">
                     <span class="session-access-line" title="${batchFullText}">
@@ -1194,16 +1314,22 @@ function renderSessions() {
                     <span class="session-access-line" title="${courseFullText}">
                         <strong>Courses:</strong> ${courseSummaryText}
                     </span>
+                    <span class="session-access-line" title="${automationSummary}">
+                        <strong>Window:</strong> ${automationSummary}
+                    </span>
                 </div>
             </td>
-            <td>${escapeHtml(session.mentorName || '-')}</td>
-            <td>
+            <td data-label="Mentor">${escapeHtml(session.mentorName || '-')}</td>
+            <td data-label="Status">
+                <div class="session-status-stack">
                 <button class="btn-toggle ${session.status}" onclick="toggleSessionStatus('${session._id}', '${session.status}')">
                     ${session.status === 'on' ? 'ON' : 'OFF'}
                 </button>
+                    <span class="session-automation-note">${automationSummary}</span>
+                </div>
             </td>
-            <td>${formatDate(session.createdAt)}</td>
-            <td>
+            <td data-label="Created">${formatDate(session.createdAt)}</td>
+            <td data-label="Actions">
                 <div class="actions">
                     <button class="btn-action edit" onclick="openEditSessionModal('${session._id}')" title="Edit">Edit</button>
                     <button class="btn-action delete" onclick="openDeleteModal('${session._id}')" title="Delete">Delete</button>
@@ -1244,6 +1370,10 @@ function openCreateSessionModal() {
     renderSessionBatchOptions([]);
     populateSessionClassOptions();
     document.getElementById('sessionClassName').value = '';
+    document.getElementById('sessionAutomationEnabled').checked = false;
+    document.getElementById('sessionScheduledStartAt').value = '';
+    document.getElementById('sessionActivationDurationMinutes').value = '';
+    setSessionAutomationState(false);
     renderCoursesCheckboxes([]); // Clear course selection
     document.getElementById('modalTitle').textContent = 'Create Session';
     document.getElementById('saveButtonText').textContent = 'Create Session';
@@ -1276,6 +1406,10 @@ async function openEditSessionModal(sessionId) {
     renderSessionBatchOptions(getSessionBatches(session));
     populateSessionClassOptions();
     document.getElementById('sessionClassName').value = session.className || '';
+    document.getElementById('sessionAutomationEnabled').checked = Boolean(session.automationEnabled);
+    document.getElementById('sessionScheduledStartAt').value = formatDateTimeLocalInput(session.scheduledStartAt);
+    document.getElementById('sessionActivationDurationMinutes').value = session.activationDurationMinutes || '';
+    setSessionAutomationState(Boolean(session.automationEnabled));
     renderCoursesCheckboxes(session.courses || []); // Pre-select session's courses
     document.getElementById('modalTitle').textContent = 'Edit Session';
     document.getElementById('saveButtonText').textContent = 'Save Changes';
@@ -1308,6 +1442,10 @@ async function handleSaveSession(event) {
     const className = document.getElementById('sessionClassName').value.trim();
     const batches = getSelectedSessionBatches();
     const courses = getSelectedCourses();
+    const automationEnabled = document.getElementById('sessionAutomationEnabled').checked;
+    const scheduledStartAtLocal = document.getElementById('sessionScheduledStartAt').value;
+    const activationDurationMinutesValue = document.getElementById('sessionActivationDurationMinutes').value;
+    const activationDurationMinutes = Number(activationDurationMinutesValue);
 
     // Validation
     if (!title || !meetingNumber || !passcode || batches.length === 0 || !mentorName || !className || courses.length === 0) {
@@ -1319,6 +1457,19 @@ async function handleSaveSession(event) {
     if (!/^\d+$/.test(meetingNumber)) {
         showToast('Meeting ID can include spaces, but it must contain only numbers', 'error');
         return;
+    }
+
+    if (automationEnabled) {
+        const scheduledStartDate = new Date(scheduledStartAtLocal);
+        if (!scheduledStartAtLocal || Number.isNaN(scheduledStartDate.getTime())) {
+            showToast('Please choose a valid automation start date and time', 'error');
+            return;
+        }
+
+        if (!Number.isInteger(activationDurationMinutes) || activationDurationMinutes < 1 || activationDurationMinutes > 1440) {
+            showToast('Automation duration must be a whole number between 1 and 1440 minutes', 'error');
+            return;
+        }
     }
 
     const isCreate = !sessionId;
@@ -1345,7 +1496,10 @@ async function handleSaveSession(event) {
                 className,
                 batch: batches[0] || '',
                 batches,
-                courses
+                courses,
+                automationEnabled,
+                scheduledStartAt: automationEnabled ? new Date(scheduledStartAtLocal).toISOString() : null,
+                activationDurationMinutes: automationEnabled ? activationDurationMinutes : null
             })
         });
 
@@ -1391,7 +1545,7 @@ async function toggleSessionStatus(sessionId, currentStatus) {
             throw new Error(data.message || 'Failed to update status');
         }
 
-        showToast(`Session status changed to ${newStatus.toUpperCase()}`, 'success');
+        showToast(data.message || `Session status changed to ${newStatus.toUpperCase()}`, 'success');
         loadSessions();
 
     } catch (error) {

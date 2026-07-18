@@ -4,8 +4,11 @@ const express = require('express');
 const cors = require('cors');
 const compression = require('compression');
 const mongoose = require('mongoose');
+const ClassSession = require('./models/ClassSession');
+const ActiveSession = require('./models/ActiveSession');
 const { ensureMongoConnection, isMongoConnected } = require('./utils/mongoConnection');
-const { autoFinalizeStaleSessions } = require('./utils/attendanceTracker');
+const { autoFinalizeStaleSessions, closeAttendanceForActiveSession } = require('./utils/attendanceTracker');
+const { getAutomatedSessionState } = require('./utils/sessionAutomation');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -51,6 +54,43 @@ async function cleanupLegacyAttendanceIndexes() {
     }
   } catch (err) {
     // Ignore legacy index cleanup issues so the app can still boot on fresh databases.
+  }
+}
+
+async function syncAutomatedSessionStatuses() {
+  const automatedSessions = await ClassSession.find({ automationEnabled: true })
+    .select('sessionId status automationEnabled scheduledStartAt scheduledEndAt activationDurationMinutes')
+    .lean();
+
+  const now = new Date();
+
+  for (const session of automatedSessions) {
+    const automationState = getAutomatedSessionState(session, now);
+
+    if (automationState.effectiveStatus === session.status) {
+      continue;
+    }
+
+    await ClassSession.updateOne(
+      { _id: session._id },
+      { $set: { status: automationState.effectiveStatus } }
+    );
+
+    if (automationState.effectiveStatus !== 'off') {
+      continue;
+    }
+
+    const activeSessions = await ActiveSession.find({
+      status: 'active',
+      classSessionId: session.sessionId
+    });
+
+    for (const activeSession of activeSessions) {
+      await closeAttendanceForActiveSession(activeSession, now, {
+        reason: automationState.inactiveReason === 'ended' ? 'scheduled_window_end' : 'scheduled_window_pending',
+        finalizedBy: 'session-automation'
+      });
+    }
   }
 }
 
@@ -161,6 +201,8 @@ const initializeDatabase = async () => {
     // Start background finalizer to run every 1 minute.
     // The timeout inside autoFinalizeStaleSessions is intentionally long so
     // an in-progress Zoom session is not ended after a brief heartbeat gap.
+    await syncAutomatedSessionStatuses();
+
     setInterval(async () => {
       try {
         if (mongoose.connection.readyState === 1) {
@@ -170,6 +212,16 @@ const initializeDatabase = async () => {
         console.error('Error in stale session auto-finalizer interval:', error.message);
       }
     }, 60000);
+
+    setInterval(async () => {
+      try {
+        if (mongoose.connection.readyState === 1) {
+          await syncAutomatedSessionStatuses();
+        }
+      } catch (error) {
+        console.error('Error in automated session scheduler interval:', error.message);
+      }
+    }, 15000);
     
   } catch (error) {
     console.error('✗ MongoDB connection failed:', error.message);

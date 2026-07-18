@@ -639,6 +639,20 @@ body {
     min-width: 320px;
 }
 
+.session-status-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.session-automation-note {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    white-space: normal;
+}
+
 .session-access-primary {
     font-weight: 600;
     color: var(--text-primary);
@@ -1092,6 +1106,38 @@ body {
     margin-top: 8px;
     font-size: 12px;
     color: var(--text-secondary);
+}
+
+.session-automation-toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-muted);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.session-automation-toggle input {
+    margin-top: 2px;
+    accent-color: var(--primary);
+}
+
+.session-automation-panel {
+    margin-top: -4px;
+    margin-bottom: 6px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-muted);
+}
+
+.session-automation-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
 }
 
 .poster-preview {
@@ -2414,6 +2460,10 @@ html[data-theme="light"] .icms-logo-text {
     .role-badge {
         padding: 0 14px;
     }
+
+    .session-automation-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 560px) {
@@ -2428,6 +2478,109 @@ html[data-theme="light"] .icms-logo-text {
     .modal-body {
         padding-left: 14px;
         padding-right: 14px;
+    }
+
+    .page-section-header .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .modal-container {
+        width: 100%;
+        max-width: none;
+        max-height: 100vh;
+        height: 100vh;
+        border-radius: 0;
+    }
+
+    .modal-actions {
+        position: sticky;
+        bottom: 0;
+        background: inherit;
+        padding-top: 12px;
+    }
+}
+
+@media (max-width: 900px) {
+    #sessionsTable thead {
+        display: none;
+    }
+
+    #sessionsTable,
+    #sessionsTable tbody,
+    #sessionsTable tr,
+    #sessionsTable td {
+        display: block;
+        width: 100%;
+    }
+
+    #sessionsTable tbody {
+        display: grid;
+        gap: 14px;
+        padding: 14px;
+    }
+
+    #sessionsTable .loading-row {
+        display: table-row;
+    }
+
+    #sessionsTable .loading-row td {
+        display: table-cell;
+        width: auto;
+    }
+
+    #sessionsTable .session-table-row {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        overflow: hidden;
+    }
+
+    #sessionsTable .session-table-row td {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        text-align: right;
+    }
+
+    #sessionsTable .session-table-row td:last-child {
+        border-bottom: none;
+    }
+
+    #sessionsTable .session-table-row td::before {
+        content: attr(data-label);
+        flex: 0 0 108px;
+        text-align: left;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    #sessionsTable .session-table-row td.session-access-cell,
+    #sessionsTable .session-table-row td[data-label="Status"],
+    #sessionsTable .session-table-row td[data-label="Actions"] {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: left;
+    }
+
+    #sessionsTable .session-table-row td.session-access-cell::before,
+    #sessionsTable .session-table-row td[data-label="Status"]::before,
+    #sessionsTable .session-table-row td[data-label="Actions"]::before {
+        flex: 0 0 auto;
+    }
+
+    #sessionsTable .session-access-cell {
+        min-width: 0;
+    }
+
+    #sessionsTable .actions {
+        justify-content: flex-start;
     }
 }
 
