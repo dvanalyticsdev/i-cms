@@ -92,6 +92,25 @@ const classSessionSchema = new mongoose.Schema(
       default: null,
       min: 1,
       max: 1440
+    },
+    automationWindows: {
+      type: [{
+        scheduledStartAt: {
+          type: Date,
+          required: true
+        },
+        scheduledEndAt: {
+          type: Date,
+          required: true
+        },
+        activationDurationMinutes: {
+          type: Number,
+          required: true,
+          min: 1,
+          max: 1440
+        }
+      }],
+      default: []
     }
   },
   {

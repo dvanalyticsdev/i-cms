@@ -328,11 +328,152 @@ function formatSessionDateTime(value) {
     });
 }
 
+function createSessionAutomationWindowRow(window = {}, index = 0) {
+    const row = document.createElement('div');
+    row.className = 'session-automation-row';
+    row.dataset.automationWindowRow = '';
+
+    const startId = index === 0 ? 'sessionScheduledStartAt' : `sessionScheduledStartAt${index}`;
+    const durationId = index === 0 ? 'sessionActivationDurationMinutes' : `sessionActivationDurationMinutes${index}`;
+
+    row.innerHTML = `
+        <div class="form-group">
+            <label class="form-label" for="${startId}">Start Date & Time *</label>
+            <input
+                type="datetime-local"
+                id="${startId}"
+                class="form-input session-automation-start"
+                value="${escapeHtml(formatDateTimeLocalInput(window.scheduledStartAt || window.startAt))}"
+            >
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="${durationId}">Active Duration (Minutes) *</label>
+            <input
+                type="number"
+                id="${durationId}"
+                class="form-input session-automation-duration"
+                min="1"
+                max="1440"
+                step="1"
+                placeholder="e.g., 90"
+                value="${escapeHtml(window.activationDurationMinutes || window.durationMinutes || '')}"
+            >
+        </div>
+
+        ${index > 0 ? `
+            <button type="button" class="btn-icon session-automation-remove" title="Remove schedule" aria-label="Remove schedule">
+                &times;
+            </button>
+        ` : ''}
+    `;
+
+    row.querySelectorAll('input').forEach(input => {
+        input.addEventListener('input', updateSessionAutomationPreview);
+    });
+
+    const removeButton = row.querySelector('.session-automation-remove');
+    if (removeButton) {
+        removeButton.addEventListener('click', () => {
+            row.remove();
+            refreshSessionAutomationRows();
+            updateSessionAutomationPreview();
+        });
+    }
+
+    return row;
+}
+
+function refreshSessionAutomationRows() {
+    const rows = Array.from(document.querySelectorAll('[data-automation-window-row]'));
+    rows.forEach((row, index) => {
+        const startInput = row.querySelector('.session-automation-start');
+        const durationInput = row.querySelector('.session-automation-duration');
+        const removeButton = row.querySelector('.session-automation-remove');
+
+        if (startInput) {
+            startInput.id = index === 0 ? 'sessionScheduledStartAt' : `sessionScheduledStartAt${index}`;
+            startInput.disabled = !document.getElementById('sessionAutomationEnabled')?.checked;
+            const label = startInput.closest('.form-group')?.querySelector('.form-label');
+            if (label) label.setAttribute('for', startInput.id);
+        }
+
+        if (durationInput) {
+            durationInput.id = index === 0 ? 'sessionActivationDurationMinutes' : `sessionActivationDurationMinutes${index}`;
+            durationInput.disabled = !document.getElementById('sessionAutomationEnabled')?.checked;
+            const label = durationInput.closest('.form-group')?.querySelector('.form-label');
+            if (label) label.setAttribute('for', durationInput.id);
+        }
+
+        if (index === 0 && removeButton) {
+            removeButton.remove();
+        }
+    });
+}
+
+function setSessionAutomationWindows(windows = []) {
+    const container = document.getElementById('sessionAutomationWindows');
+    if (!container) {
+        return;
+    }
+
+    const normalizedWindows = windows.length > 0 ? windows : [{}];
+    container.innerHTML = '';
+    normalizedWindows.forEach((window, index) => {
+        container.appendChild(createSessionAutomationWindowRow(window, index));
+    });
+    refreshSessionAutomationRows();
+    updateSessionAutomationPreview();
+}
+
+function getSessionAutomationWindows() {
+    return Array.from(document.querySelectorAll('[data-automation-window-row]')).map(row => {
+        const startValue = row.querySelector('.session-automation-start')?.value || '';
+        const durationValue = row.querySelector('.session-automation-duration')?.value || '';
+
+        return {
+            scheduledStartAtLocal: startValue,
+            activationDurationMinutesValue: durationValue,
+            activationDurationMinutes: Number(durationValue)
+        };
+    });
+}
+
+function getExistingSessionAutomationWindows(session = {}) {
+    if (Array.isArray(session.automationWindows) && session.automationWindows.length > 0) {
+        return session.automationWindows.map(window => ({
+            scheduledStartAt: window.scheduledStartAt,
+            activationDurationMinutes: window.activationDurationMinutes
+        }));
+    }
+
+    if (session.scheduledStartAt || session.activationDurationMinutes) {
+        return [{
+            scheduledStartAt: session.scheduledStartAt,
+            activationDurationMinutes: session.activationDurationMinutes
+        }];
+    }
+
+    return [{}];
+}
+
+function addSessionAutomationWindow() {
+    const container = document.getElementById('sessionAutomationWindows');
+    if (!container) {
+        return;
+    }
+
+    const row = createSessionAutomationWindowRow({}, container.querySelectorAll('[data-automation-window-row]').length);
+    container.appendChild(row);
+    refreshSessionAutomationRows();
+    row.querySelector('.session-automation-start')?.focus();
+    updateSessionAutomationPreview();
+}
+
 function updateSessionAutomationPreview() {
     const preview = document.getElementById('sessionAutomationPreview');
     const enabled = document.getElementById('sessionAutomationEnabled')?.checked;
-    const startValue = document.getElementById('sessionScheduledStartAt')?.value || '';
-    const durationValue = Number(document.getElementById('sessionActivationDurationMinutes')?.value || 0);
+    const windows = getSessionAutomationWindows();
 
     if (!preview) {
         return;
@@ -343,36 +484,42 @@ function updateSessionAutomationPreview() {
         return;
     }
 
-    if (!startValue || !Number.isFinite(durationValue) || durationValue <= 0) {
+    if (windows.some(window => !window.scheduledStartAtLocal || !Number.isFinite(window.activationDurationMinutes) || window.activationDurationMinutes <= 0)) {
         preview.textContent = 'Choose a valid start time and duration to schedule the automatic join window.';
         return;
     }
 
-    const startAt = new Date(startValue);
-    if (Number.isNaN(startAt.getTime())) {
+    const parsedWindows = windows.map(window => ({
+        startAt: new Date(window.scheduledStartAtLocal),
+        durationMinutes: window.activationDurationMinutes
+    }));
+
+    if (parsedWindows.some(window => Number.isNaN(window.startAt.getTime()))) {
         preview.textContent = 'Choose a valid start time and duration to schedule the automatic join window.';
         return;
     }
 
-    const endAt = new Date(startAt.getTime() + (durationValue * 60000));
-    preview.textContent = `Students can join automatically from ${formatSessionDateTime(startAt)} until ${formatSessionDateTime(endAt)}.`;
+    const firstWindow = parsedWindows[0];
+    const firstEndAt = new Date(firstWindow.startAt.getTime() + (firstWindow.durationMinutes * 60000));
+    const suffix = parsedWindows.length > 1 ? ` plus ${parsedWindows.length - 1} more schedule${parsedWindows.length > 2 ? 's' : ''}` : '';
+    preview.textContent = `Students can join automatically from ${formatSessionDateTime(firstWindow.startAt)} until ${formatSessionDateTime(firstEndAt)}${suffix}.`;
 }
 
 function setSessionAutomationState(isEnabled) {
     const fields = document.getElementById('sessionAutomationFields');
-    const startInput = document.getElementById('sessionScheduledStartAt');
-    const durationInput = document.getElementById('sessionActivationDurationMinutes');
+    const inputs = document.querySelectorAll('.session-automation-start, .session-automation-duration');
+    const addButton = document.getElementById('addSessionAutomationWindow');
 
     if (fields) {
         fields.classList.toggle('hidden', !isEnabled);
     }
 
-    if (startInput) {
-        startInput.disabled = !isEnabled;
-    }
+    inputs.forEach(input => {
+        input.disabled = !isEnabled;
+    });
 
-    if (durationInput) {
-        durationInput.disabled = !isEnabled;
+    if (addButton) {
+        addButton.disabled = !isEnabled;
     }
 
     updateSessionAutomationPreview();
@@ -885,6 +1032,11 @@ function setupEventListeners() {
         automationDurationInput.addEventListener('input', updateSessionAutomationPreview);
     }
 
+    const addAutomationWindowButton = document.getElementById('addSessionAutomationWindow');
+    if (addAutomationWindowButton) {
+        addAutomationWindowButton.addEventListener('click', addSessionAutomationWindow);
+    }
+
     setupClassAccessScrolling();
     setupAttendanceDetailScrolling();
 
@@ -1371,8 +1523,7 @@ function openCreateSessionModal() {
     populateSessionClassOptions();
     document.getElementById('sessionClassName').value = '';
     document.getElementById('sessionAutomationEnabled').checked = false;
-    document.getElementById('sessionScheduledStartAt').value = '';
-    document.getElementById('sessionActivationDurationMinutes').value = '';
+    setSessionAutomationWindows([{}]);
     setSessionAutomationState(false);
     renderCoursesCheckboxes([]); // Clear course selection
     document.getElementById('modalTitle').textContent = 'Create Session';
@@ -1407,8 +1558,7 @@ async function openEditSessionModal(sessionId) {
     populateSessionClassOptions();
     document.getElementById('sessionClassName').value = session.className || '';
     document.getElementById('sessionAutomationEnabled').checked = Boolean(session.automationEnabled);
-    document.getElementById('sessionScheduledStartAt').value = formatDateTimeLocalInput(session.scheduledStartAt);
-    document.getElementById('sessionActivationDurationMinutes').value = session.activationDurationMinutes || '';
+    setSessionAutomationWindows(getExistingSessionAutomationWindows(session));
     setSessionAutomationState(Boolean(session.automationEnabled));
     renderCoursesCheckboxes(session.courses || []); // Pre-select session's courses
     document.getElementById('modalTitle').textContent = 'Edit Session';
@@ -1443,9 +1593,7 @@ async function handleSaveSession(event) {
     const batches = getSelectedSessionBatches();
     const courses = getSelectedCourses();
     const automationEnabled = document.getElementById('sessionAutomationEnabled').checked;
-    const scheduledStartAtLocal = document.getElementById('sessionScheduledStartAt').value;
-    const activationDurationMinutesValue = document.getElementById('sessionActivationDurationMinutes').value;
-    const activationDurationMinutes = Number(activationDurationMinutesValue);
+    const automationWindows = getSessionAutomationWindows();
 
     // Validation
     if (!title || !meetingNumber || !passcode || batches.length === 0 || !mentorName || !className || courses.length === 0) {
@@ -1460,17 +1608,28 @@ async function handleSaveSession(event) {
     }
 
     if (automationEnabled) {
-        const scheduledStartDate = new Date(scheduledStartAtLocal);
-        if (!scheduledStartAtLocal || Number.isNaN(scheduledStartDate.getTime())) {
-            showToast('Please choose a valid automation start date and time', 'error');
-            return;
-        }
+        for (const window of automationWindows) {
+            const scheduledStartDate = new Date(window.scheduledStartAtLocal);
+            if (!window.scheduledStartAtLocal || Number.isNaN(scheduledStartDate.getTime())) {
+                showToast('Please choose a valid automation start date and time', 'error');
+                return;
+            }
 
-        if (!Number.isInteger(activationDurationMinutes) || activationDurationMinutes < 1 || activationDurationMinutes > 1440) {
-            showToast('Automation duration must be a whole number between 1 and 1440 minutes', 'error');
-            return;
+            if (!Number.isInteger(window.activationDurationMinutes) || window.activationDurationMinutes < 1 || window.activationDurationMinutes > 1440) {
+                showToast('Automation duration must be a whole number between 1 and 1440 minutes', 'error');
+                return;
+            }
         }
     }
+
+    const normalizedAutomationWindows = automationEnabled
+        ? automationWindows.map(window => ({
+            scheduledStartAt: new Date(window.scheduledStartAtLocal).toISOString(),
+            activationDurationMinutes: window.activationDurationMinutes
+        }))
+        : [];
+
+    const primaryAutomationWindow = normalizedAutomationWindows[0] || null;
 
     const isCreate = !sessionId;
     const url = isCreate
@@ -1498,8 +1657,9 @@ async function handleSaveSession(event) {
                 batches,
                 courses,
                 automationEnabled,
-                scheduledStartAt: automationEnabled ? new Date(scheduledStartAtLocal).toISOString() : null,
-                activationDurationMinutes: automationEnabled ? activationDurationMinutes : null
+                automationWindows: normalizedAutomationWindows,
+                scheduledStartAt: primaryAutomationWindow?.scheduledStartAt || null,
+                activationDurationMinutes: primaryAutomationWindow?.activationDurationMinutes || null
             })
         });
 

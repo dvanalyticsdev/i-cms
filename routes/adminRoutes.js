@@ -114,29 +114,48 @@ function buildSessionAutomationFields(payload = {}) {
       automationEnabled: false,
       scheduledStartAt: null,
       scheduledEndAt: null,
-      activationDurationMinutes: null
+      activationDurationMinutes: null,
+      automationWindows: []
     };
   }
 
-  const scheduledStartAt = toValidDate(payload.scheduledStartAt);
-  if (!scheduledStartAt) {
-    const error = new Error('A valid automation start date and time is required');
-    error.status = 400;
-    throw error;
-  }
+  const requestedWindows = Array.isArray(payload.automationWindows) && payload.automationWindows.length > 0
+    ? payload.automationWindows
+    : [{
+        scheduledStartAt: payload.scheduledStartAt,
+        activationDurationMinutes: payload.activationDurationMinutes
+      }];
 
-  const activationDurationMinutes = Number(payload.activationDurationMinutes);
-  if (!Number.isInteger(activationDurationMinutes) || activationDurationMinutes < 1 || activationDurationMinutes > 1440) {
-    const error = new Error('Automation duration must be a whole number between 1 and 1440 minutes');
-    error.status = 400;
-    throw error;
-  }
+  const automationWindows = requestedWindows.map((window) => {
+    const scheduledStartAt = toValidDate(window?.scheduledStartAt);
+    if (!scheduledStartAt) {
+      const error = new Error('A valid automation start date and time is required');
+      error.status = 400;
+      throw error;
+    }
+
+    const activationDurationMinutes = Number(window?.activationDurationMinutes);
+    if (!Number.isInteger(activationDurationMinutes) || activationDurationMinutes < 1 || activationDurationMinutes > 1440) {
+      const error = new Error('Automation duration must be a whole number between 1 and 1440 minutes');
+      error.status = 400;
+      throw error;
+    }
+
+    return {
+      scheduledStartAt,
+      scheduledEndAt: new Date(scheduledStartAt.getTime() + (activationDurationMinutes * 60000)),
+      activationDurationMinutes
+    };
+  }).sort((a, b) => a.scheduledStartAt.getTime() - b.scheduledStartAt.getTime());
+
+  const primaryWindow = automationWindows[0];
 
   return {
     automationEnabled: true,
-    scheduledStartAt,
-    scheduledEndAt: new Date(scheduledStartAt.getTime() + (activationDurationMinutes * 60000)),
-    activationDurationMinutes
+    scheduledStartAt: primaryWindow.scheduledStartAt,
+    scheduledEndAt: primaryWindow.scheduledEndAt,
+    activationDurationMinutes: primaryWindow.activationDurationMinutes,
+    automationWindows
   };
 }
 
@@ -622,7 +641,7 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
     }
 
     const { title, meetingNumber, passcode, description, courses, batch, batches, mentorName, className, posterImage } = req.body;
-    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined && batches === undefined && mentorName === undefined && className === undefined && posterImage === undefined && req.body.automationEnabled === undefined && req.body.scheduledStartAt === undefined && req.body.activationDurationMinutes === undefined) {
+    if (!title && !meetingNumber && !passcode && !description && !courses && batch === undefined && batches === undefined && mentorName === undefined && className === undefined && posterImage === undefined && req.body.automationEnabled === undefined && req.body.automationWindows === undefined && req.body.scheduledStartAt === undefined && req.body.activationDurationMinutes === undefined) {
       return res.status(400).json({ success: false, message: 'At least one field must be provided for update' });
     }
 
@@ -671,9 +690,10 @@ router.put('/session/:id', authMiddleware, async (req, res) => {
       updateData.courses = normalizedCourses;
     }
 
-    if (req.body.automationEnabled !== undefined || req.body.scheduledStartAt !== undefined || req.body.activationDurationMinutes !== undefined) {
+    if (req.body.automationEnabled !== undefined || req.body.automationWindows !== undefined || req.body.scheduledStartAt !== undefined || req.body.activationDurationMinutes !== undefined) {
       const automationFields = buildSessionAutomationFields({
-        automationEnabled: req.body.automationEnabled,
+        automationEnabled: req.body.automationEnabled !== undefined ? req.body.automationEnabled : existingSession.automationEnabled,
+        automationWindows: req.body.automationWindows !== undefined ? req.body.automationWindows : existingSession.automationWindows,
         scheduledStartAt: req.body.scheduledStartAt !== undefined ? req.body.scheduledStartAt : existingSession.scheduledStartAt,
         activationDurationMinutes: req.body.activationDurationMinutes !== undefined ? req.body.activationDurationMinutes : existingSession.activationDurationMinutes
       });

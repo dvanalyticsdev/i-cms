@@ -997,28 +997,36 @@
                     </div>
 
                     <div id="sessionAutomationFields" class="session-automation-panel hidden">
-                        <div class="session-automation-grid">
-                            <div class="form-group">
-                                <label class="form-label">Start Date & Time *</label>
-                                <input
-                                    type="datetime-local"
-                                    id="sessionScheduledStartAt"
-                                    class="form-input"
-                                >
-                            </div>
+                        <div id="sessionAutomationWindows" class="session-automation-windows">
+                            <div class="session-automation-row" data-automation-window-row>
+                                <div class="form-group">
+                                    <label class="form-label">Start Date & Time *</label>
+                                    <input
+                                        type="datetime-local"
+                                        id="sessionScheduledStartAt"
+                                        class="form-input session-automation-start"
+                                    >
+                                </div>
 
-                            <div class="form-group">
-                                <label class="form-label">Active Duration (Minutes) *</label>
-                                <input
-                                    type="number"
-                                    id="sessionActivationDurationMinutes"
-                                    class="form-input"
-                                    min="1"
-                                    max="1440"
-                                    step="1"
-                                    placeholder="e.g., 90"
-                                >
+                                <div class="form-group">
+                                    <label class="form-label">Active Duration (Minutes) *</label>
+                                    <input
+                                        type="number"
+                                        id="sessionActivationDurationMinutes"
+                                        class="form-input session-automation-duration"
+                                        min="1"
+                                        max="1440"
+                                        step="1"
+                                        placeholder="e.g., 90"
+                                    >
+                                </div>
                             </div>
+                        </div>
+
+                        <div class="session-automation-add">
+                            <button type="button" id="addSessionAutomationWindow" class="btn-icon" title="Add another schedule" aria-label="Add another schedule">
+                                +
+                            </button>
                         </div>
 
                         <p id="sessionAutomationPreview" class="form-hint">Set a start time and duration to preview the automatic activation window.</p>

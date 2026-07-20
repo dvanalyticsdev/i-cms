@@ -1134,10 +1134,58 @@ body {
     background: var(--surface-muted);
 }
 
-.session-automation-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+.session-automation-windows {
+    display: flex;
+    flex-direction: column;
     gap: 14px;
+}
+
+.session-automation-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    align-items: end;
+    gap: 14px;
+}
+
+.session-automation-add {
+    margin-top: 10px;
+}
+
+.btn-icon {
+    width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.btn-icon:hover:not(:disabled) {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.btn-icon:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.session-automation-remove {
+    margin-bottom: 0;
+    color: var(--danger);
+    font-size: 20px;
+}
+
+.session-automation-remove:hover:not(:disabled) {
+    border-color: var(--danger);
+    color: var(--danger);
 }
 
 .poster-preview {
@@ -2461,8 +2509,12 @@ html[data-theme="light"] .icms-logo-text {
         padding: 0 14px;
     }
 
-    .session-automation-grid {
+    .session-automation-row {
         grid-template-columns: 1fr;
+    }
+
+    .session-automation-remove {
+        width: 100%;
     }
 }
 
