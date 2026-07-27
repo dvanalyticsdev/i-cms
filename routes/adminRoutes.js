@@ -5,6 +5,7 @@ const { generateToken, verifyAdminCredentials, getAdminCredentialVersion } = req
 const ClassSession = require('../models/ClassSession');
 const Course = require('../models/Course');
 const ClassAccessRule = require('../models/ClassAccessRule');
+const ClassAccessCatalog = require('../models/ClassAccessCatalog');
 const ActiveSession = require('../models/ActiveSession');
 const Student = require('../models/Student');
 const GuestMentorId = require('../models/GuestMentorId');
@@ -246,7 +247,15 @@ async function validateSelectedCourses(courses) {
 
 async function getClassCatalog() {
   const rules = await ClassAccessRule.find({}).lean();
+  const catalog = await ClassAccessCatalog.findOne({ key: 'default' }).lean();
   const classNames = new Set();
+
+  (catalog?.classNames || []).forEach((className) => {
+    const normalizedClassName = normalizeText(className);
+    if (normalizedClassName) {
+      classNames.add(normalizedClassName);
+    }
+  });
 
   rules.forEach((rule) => {
     const accessMap = rule.accessMap instanceof Map ? Object.fromEntries(rule.accessMap.entries()) : (rule.accessMap || {});
@@ -258,6 +267,32 @@ async function getClassCatalog() {
   });
 
   return Array.from(classNames).sort();
+}
+
+async function saveClassCatalog(classNames = []) {
+  const normalizedClassNames = Array.from(
+    new Set(
+      classNames
+        .map((className) => normalizeText(className))
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right));
+
+  await ClassAccessCatalog.findOneAndUpdate(
+    { key: 'default' },
+    {
+      $set: {
+        classNames: normalizedClassNames
+      }
+    },
+    {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true
+    }
+  );
+
+  return normalizedClassNames;
 }
 
 async function ensureClassAccessRulesForCourses(courseNames = []) {
@@ -972,9 +1007,26 @@ router.put('/class-access-rules', authMiddleware, async (req, res) => {
     }
 
     const rules = Array.isArray(req.body.rules) ? req.body.rules : [];
+    const classNamesInput = Array.isArray(req.body.classNames) ? req.body.classNames : [];
     if (rules.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one rule row is required' });
     }
+
+    const classNamesFromRules = new Set();
+    rules.forEach((rule) => {
+      const accessMap = rule?.accessMap && typeof rule.accessMap === 'object' ? rule.accessMap : {};
+      Object.keys(accessMap).forEach((className) => {
+        const normalizedClassName = normalizeText(className);
+        if (normalizedClassName) {
+          classNamesFromRules.add(normalizedClassName);
+        }
+      });
+    });
+
+    await saveClassCatalog([
+      ...classNamesInput,
+      ...Array.from(classNamesFromRules)
+    ]);
 
     await ClassAccessRule.bulkWrite(
       rules.map((rule) => ({

@@ -1311,7 +1311,9 @@ function addClassColumn() {
     input.value = '';
     renderClassAccessRules();
     populateSessionClassOptions();
-    showToast(`Added ${className} to the access table`, 'success');
+    saveClassAccessRules({
+        successMessage: `Added ${className} to the access table`
+    });
 }
 
 function removeClassColumn(className) {
@@ -1337,10 +1339,12 @@ function removeClassColumn(className) {
 
     renderClassAccessRules();
     populateSessionClassOptions();
-    showToast(`Removed ${normalizedClassName} from the access table`, 'success');
+    saveClassAccessRules({
+        successMessage: `Removed ${normalizedClassName} from the access table`
+    });
 }
 
-async function saveClassAccessRules() {
+async function saveClassAccessRules(options = {}) {
     try {
         const payload = classAccessRules.map((rule, ruleIndex) => {
             const nextAccessMap = { ...(rule.accessMap || {}) };
@@ -1366,7 +1370,10 @@ async function saveClassAccessRules() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${authToken}`
             },
-            body: JSON.stringify({ rules: payload })
+            body: JSON.stringify({
+                rules: payload,
+                classNames: availableClassNames
+            })
         });
 
         const data = await response.json();
@@ -1374,8 +1381,8 @@ async function saveClassAccessRules() {
             throw new Error(data.message || 'Failed to save class access rules');
         }
 
-        showToast('Class access rules updated successfully', 'success');
-        loadClassAccessRules();
+        showToast(options.successMessage || 'Class access rules updated successfully', 'success');
+        await loadClassAccessRules();
     } catch (error) {
         console.error('Error saving class access rules:', error);
         showToast(error.message || 'Error saving class access rules', 'error');
