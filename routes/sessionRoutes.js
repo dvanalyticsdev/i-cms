@@ -13,7 +13,7 @@ const {
   recordSessionJoin
 } = require('../utils/attendanceTracker');
 const { mapRulesByKey, isClassAccessible } = require('../utils/classAccess');
-const { getAutomatedSessionState } = require('../utils/sessionAutomation');
+const { getSessionAutomationSelectFields, withEffectiveSessionStatus } = require('../utils/sessionAutomation');
 
 function getSessionBatches(session) {
   if (Array.isArray(session?.batches) && session.batches.length > 0) {
@@ -51,23 +51,6 @@ function resolveStudentBatchForSession(student, session) {
   const sessionBatches = getSessionBatches(session);
   const matchedBatch = studentBatches.find(batch => sessionBatches.includes(batch));
   return matchedBatch || studentBatches[0] || '';
-}
-
-function withEffectiveSessionStatus(session, now = new Date()) {
-  const automationState = getAutomatedSessionState(session, now);
-
-  return {
-    ...session,
-    status: automationState.effectiveStatus,
-    automation: {
-      enabled: automationState.enabled,
-      activeWindow: automationState.isActiveWindow,
-      scheduledStartAt: automationState.startAt,
-      scheduledEndAt: automationState.endAt,
-      activationDurationMinutes: automationState.durationMinutes,
-      inactiveReason: automationState.inactiveReason
-    }
-  };
 }
 
 /**
@@ -111,7 +94,21 @@ router.get('/class-sessions', async (req, res) => {
     
     if (studentCourse) {
       const allSessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description posterImage createdAt updatedAt courses passcode batch batches mentorName className')
+        .select(getSessionAutomationSelectFields([
+          'sessionId',
+          'title',
+          'meetingNumber',
+          'description',
+          'posterImage',
+          'createdAt',
+          'updatedAt',
+          'courses',
+          'passcode',
+          'batch',
+          'batches',
+          'mentorName',
+          'className'
+        ]))
         .sort({ updatedAt: -1 })
         .lean();
       
@@ -145,7 +142,21 @@ router.get('/class-sessions', async (req, res) => {
       });
     } else {
       const sessions = await ClassSession.find()
-        .select('sessionId title meetingNumber status description posterImage createdAt updatedAt courses passcode batch batches mentorName className')
+        .select(getSessionAutomationSelectFields([
+          'sessionId',
+          'title',
+          'meetingNumber',
+          'description',
+          'posterImage',
+          'createdAt',
+          'updatedAt',
+          'courses',
+          'passcode',
+          'batch',
+          'batches',
+          'mentorName',
+          'className'
+        ]))
         .sort({ updatedAt: -1 })
         .lean();
 

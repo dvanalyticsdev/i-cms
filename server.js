@@ -8,7 +8,7 @@ const ClassSession = require('./models/ClassSession');
 const ActiveSession = require('./models/ActiveSession');
 const { ensureMongoConnection, isMongoConnected } = require('./utils/mongoConnection');
 const { autoFinalizeStaleSessions, closeAttendanceForActiveSession } = require('./utils/attendanceTracker');
-const { getAutomatedSessionState } = require('./utils/sessionAutomation');
+const { getAutomatedSessionState, getSessionAutomationSelectFields } = require('./utils/sessionAutomation');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -59,7 +59,7 @@ async function cleanupLegacyAttendanceIndexes() {
 
 async function syncAutomatedSessionStatuses() {
   const automatedSessions = await ClassSession.find({ automationEnabled: true })
-    .select('sessionId status automationEnabled scheduledStartAt scheduledEndAt activationDurationMinutes')
+    .select(getSessionAutomationSelectFields(['sessionId']))
     .lean();
 
   const now = new Date();
