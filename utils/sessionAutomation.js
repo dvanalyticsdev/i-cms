@@ -46,6 +46,22 @@ function normalizeAutomationWindows(session = {}) {
   }];
 }
 
+const SESSION_AUTOMATION_FIELD_NAMES = [
+  'status',
+  'automationEnabled',
+  'scheduledStartAt',
+  'scheduledEndAt',
+  'activationDurationMinutes',
+  'automationWindows'
+];
+
+function getSessionAutomationSelectFields(extraFields = []) {
+  return Array.from(new Set([
+    ...extraFields,
+    ...SESSION_AUTOMATION_FIELD_NAMES
+  ])).join(' ');
+}
+
 function resolveAutomationWindow(session = {}, now = new Date()) {
   const enabled = Boolean(session.automationEnabled);
   const windows = normalizeAutomationWindows(session);
@@ -105,8 +121,32 @@ function getAutomatedSessionState(session = {}, now = new Date()) {
   };
 }
 
+function withEffectiveSessionStatus(session = {}, now = new Date()) {
+  const automationState = getAutomatedSessionState(session, now);
+
+  return {
+    ...session,
+    status: automationState.effectiveStatus,
+    automation: {
+      enabled: automationState.enabled,
+      activeWindow: automationState.isActiveWindow,
+      scheduledStartAt: automationState.startAt,
+      scheduledEndAt: automationState.endAt,
+      activationDurationMinutes: automationState.durationMinutes,
+      inactiveReason: automationState.inactiveReason,
+      windows: automationState.windows.map((window) => ({
+        scheduledStartAt: window.startAt,
+        scheduledEndAt: window.endAt,
+        activationDurationMinutes: window.durationMinutes
+      }))
+    }
+  };
+}
+
 module.exports = {
   getAutomatedSessionState,
+  getSessionAutomationSelectFields,
   resolveAutomationWindow,
-  toValidDate
+  toValidDate,
+  withEffectiveSessionStatus
 };

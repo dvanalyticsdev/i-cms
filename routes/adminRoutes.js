@@ -14,7 +14,7 @@ const { logSessionActivity, getTimestampParts } = require('../utils/sessionLogge
 const { sanitizeLmsId } = require('../utils/studentValidation');
 const { closeAttendanceForActiveSession, endActiveSession } = require('../utils/attendanceTracker');
 const { normalizePaymentStatus, normalizeFeeStatusException } = require('../utils/classAccess');
-const { getAutomatedSessionState, toValidDate } = require('../utils/sessionAutomation');
+const { getAutomatedSessionState, toValidDate, withEffectiveSessionStatus } = require('../utils/sessionAutomation');
 const CLASS_ACCESS_PAYMENT_STATUSES = ['DEFAULT', 'FULLY PAID', 'PENDING'];
 const SESSION_LOG_ALLOWED_ACTIONS = ['Created Session', 'Updated Session', 'Session Status Updated', 'Deleted Session'];
 const { syncWorkbookData } = require('../utils/workbookSync');
@@ -609,8 +609,16 @@ router.post('/session', authMiddleware, async (req, res) => {
  */
 router.get('/sessions', authMiddleware, async (req, res) => {
   try {
-    const sessions = await ClassSession.find().sort({ createdAt: -1 }).lean();
-    return res.status(200).json({ success: true, message: 'Sessions retrieved successfully', sessions, total: sessions.length });
+    const sessions = await ClassSession.find()
+      .sort({ createdAt: -1 })
+      .lean();
+    const now = new Date();
+    return res.status(200).json({
+      success: true,
+      message: 'Sessions retrieved successfully',
+      sessions: sessions.map(session => withEffectiveSessionStatus(session, now)),
+      total: sessions.length
+    });
   } catch (error) {
     console.error('Error retrieving sessions:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });
