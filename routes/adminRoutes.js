@@ -327,9 +327,25 @@ async function ensureClassAccessRulesForCourses(courseNames = []) {
   );
 }
 
-async function ensureClassAccessRulesForAllCourses() {
+async function syncClassAccessRulesForCurrentCourses() {
   const courses = await Course.find({}, { courseName: 1 }).lean();
-  await ensureClassAccessRulesForCourses(courses.map((course) => course.courseName));
+  const courseNames = Array.from(
+    new Set(
+      courses
+        .map((course) => normalizeText(course.courseName))
+        .filter(Boolean)
+    )
+  );
+
+  if (courseNames.length === 0) {
+    await ClassAccessRule.deleteMany({});
+    return courseNames;
+  }
+
+  await ClassAccessRule.deleteMany({ course: { $nin: courseNames } });
+  await ensureClassAccessRulesForCourses(courseNames);
+
+  return courseNames;
 }
 
 /**
@@ -986,7 +1002,7 @@ router.get('/class-access-rules', authMiddleware, async (req, res) => {
       return;
     }
 
-    await ensureClassAccessRulesForAllCourses();
+    await syncClassAccessRulesForCurrentCourses();
     const rules = await ClassAccessRule.find({}).sort({ course: 1, paymentStatus: 1 }).lean();
     const classNames = await getClassCatalog();
 
@@ -1014,14 +1030,20 @@ router.put('/class-access-rules', authMiddleware, async (req, res) => {
       return;
     }
 
+    const currentCourseNames = await syncClassAccessRulesForCurrentCourses();
+    const currentCourseNameSet = new Set(currentCourseNames);
     const rules = Array.isArray(req.body.rules) ? req.body.rules : [];
     const classNamesInput = Array.isArray(req.body.classNames) ? req.body.classNames : [];
-    if (rules.length === 0) {
-      return res.status(400).json({ success: false, message: 'At least one rule row is required' });
-    }
+    const normalizedRules = rules
+      .map((rule) => ({
+        course: normalizeText(rule?.course),
+        paymentStatus: normalizePaymentStatus(rule?.paymentStatus),
+        accessMap: rule?.accessMap || {}
+      }))
+      .filter((rule) => rule.course && currentCourseNameSet.has(rule.course));
 
     const classNamesFromRules = new Set();
-    rules.forEach((rule) => {
+    normalizedRules.forEach((rule) => {
       const accessMap = rule?.accessMap && typeof rule.accessMap === 'object' ? rule.accessMap : {};
       Object.keys(accessMap).forEach((className) => {
         const normalizedClassName = normalizeText(className);
@@ -1036,12 +1058,13 @@ router.put('/class-access-rules', authMiddleware, async (req, res) => {
       ...Array.from(classNamesFromRules)
     ]);
 
-    await ClassAccessRule.bulkWrite(
-      rules.map((rule) => ({
+    if (normalizedRules.length > 0) {
+      await ClassAccessRule.bulkWrite(
+        normalizedRules.map((rule) => ({
         updateOne: {
           filter: {
-            course: normalizeText(rule.course),
-            paymentStatus: normalizePaymentStatus(rule.paymentStatus)
+            course: rule.course,
+            paymentStatus: rule.paymentStatus
           },
           update: {
             $set: {
@@ -1052,8 +1075,9 @@ router.put('/class-access-rules', authMiddleware, async (req, res) => {
           upsert: true
         }
       })),
-      { ordered: false }
-    );
+        { ordered: false }
+      );
+    }
 
     return res.status(200).json({ success: true, message: 'Class access rules updated successfully' });
   } catch (error) {
