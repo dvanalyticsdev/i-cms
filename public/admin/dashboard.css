@@ -801,6 +801,12 @@ body {
 .class-access-table td {
     white-space: nowrap;
     vertical-align: middle;
+    border-right: 1px solid var(--border-color);
+}
+
+.class-access-table th:last-child,
+.class-access-table td:last-child {
+    border-right: none;
 }
 
 .class-access-table th {
@@ -819,17 +825,36 @@ body {
 }
 
 .class-access-rule-header {
-    min-width: 118px;
-    max-width: 118px;
+    width: 220px;
+    min-width: 220px;
+    max-width: 220px;
     white-space: normal;
     line-height: 1.35;
+    overflow: hidden;
+    text-align: center;
 }
 
 .class-access-header-cell {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    align-items: flex-start;
+    align-items: center;
+    justify-content: flex-start;
+    width: min(180px, 100%);
+    min-height: 66px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+.class-access-header-cell span {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-height: 36px;
+    white-space: normal !important;
+    overflow: hidden;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 .class-access-remove-btn {
@@ -842,6 +867,7 @@ body {
     font-weight: 700;
     line-height: 1;
     cursor: pointer;
+    align-self: center;
     transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
@@ -851,11 +877,14 @@ body {
 }
 
 .class-access-rule-cell {
-    min-width: 118px;
+    width: 220px;
+    min-width: 220px;
+    max-width: 220px;
     background: var(--surface);
 }
 
 .class-access-select {
+    display: block;
     min-width: 88px;
     max-width: 88px;
     padding: 10px 30px 10px 12px;
