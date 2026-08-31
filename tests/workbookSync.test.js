@@ -29,17 +29,17 @@ test('extractGoogleSheetId handles edit URLs and raw ids', () => {
   assert.strictEqual(extractGoogleSheetId('1z7897mcMyPRWyvRiXG5tPziXkLnkaE_6'), '1z7897mcMyPRWyvRiXG5tPziXkLnkaE_6');
 });
 
-test('readStudentWorkbook maps the three Google Sheet tabs to CMS courses', async () => {
+test('readStudentWorkbook maps configured tabs and uses row CMS course names', async () => {
   const filePath = writeWorkbook({
     'Gen AI & Adv AI': [
       {
-        LMSID: 'LMS001',
-        'STUDENT NAME': 'Asha Rao',
-        MOBILE: '98765 43210',
+        STU_ID: 'LMS001',
+        STU_NAME: 'Asha Rao',
+        'MOBILE-1': '98765 43210',
         'EMAIL ID': 'ASHA@example.com',
-        BATCH: 'B1',
-        YEAR: '2026',
-        'PAYMENT STATUS': 'Fully Paid'
+        BATCH: 'DV 202604',
+        COURSE: 'Gen AI & Agentic AI',
+        STATUS: 'CLOSED'
       }
     ],
     'Data Scienece': [
@@ -48,8 +48,8 @@ test('readStudentWorkbook maps the three Google Sheet tabs to CMS courses', asyn
         'STUDENT NAME': 'Rohan Shah',
         MOBILE: '88888-77777',
         'EMAIL ID': 'rohan@example.com',
-        BATCH: 'B2',
-        YEAR: '2026',
+        BATCH: '202507, DV202203',
+        COURSE: 'APIDS',
         'PAYMENT STATUS': 'Pending'
       }
     ],
@@ -59,8 +59,8 @@ test('readStudentWorkbook maps the three Google Sheet tabs to CMS courses', asyn
         NAME: 'Neha Verma',
         PHONE: '99999 11111',
         EMAIL: 'neha@example.com',
-        BATCH: 'B3',
-        YEAR: '2026',
+        BATCH: 'DV 202408',
+        COURSE: 'APCFCS',
         'FEES STATUS': 'Default'
       }
     ],
@@ -85,12 +85,17 @@ test('readStudentWorkbook maps the three Google Sheet tabs to CMS courses', asyn
       ['LMS001', 'LMS002', 'LMS003']
     );
     assert.deepStrictEqual(students.find((student) => student.lmsId === 'LMS001').course, ['Gen AI & Agentic AI']);
-    assert.deepStrictEqual(students.find((student) => student.lmsId === 'LMS002').course, ['DAS']);
+    assert.deepStrictEqual(students.find((student) => student.lmsId === 'LMS002').course, ['APIDS']);
     assert.deepStrictEqual(students.find((student) => student.lmsId === 'LMS003').course, ['APCFCS']);
     assert.strictEqual(students.find((student) => student.lmsId === 'LMS001').emailId, 'asha@example.com');
+    assert.strictEqual(students.find((student) => student.lmsId === 'LMS001').paymentStatus, 'FULLY PAID');
+    assert.strictEqual(students.find((student) => student.lmsId === 'LMS001').batch, '202604');
+    assert.strictEqual(students.find((student) => student.lmsId === 'LMS001').year, '2026');
+    assert.deepStrictEqual(students.find((student) => student.lmsId === 'LMS002').batches, ['202507', '202203']);
+    assert.strictEqual(students.find((student) => student.lmsId === 'LMS002').year, '2025');
     assert.strictEqual(students.find((student) => student.lmsId === 'LMS002').paymentStatus, 'PENDING');
+    assert.strictEqual(students.find((student) => student.lmsId === 'LMS003').batch, '202408');
   } finally {
     fs.rmSync(filePath, { force: true });
   }
 });
-

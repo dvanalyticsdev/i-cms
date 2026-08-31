@@ -14,17 +14,17 @@ const DEFAULT_STUDENT_SHEET_MAPPINGS = [
   {
     sheetName: 'Gen AI & Adv AI',
     aliases: ['Gen AI & Agentic AI'],
-    courseName: 'Gen AI & Agentic AI'
+    courseName: ''
   },
   {
     sheetName: 'Data Scienece',
     aliases: ['Data Science'],
-    courseName: 'DAS'
+    courseName: ''
   },
   {
     sheetName: 'Cyber Security',
     aliases: ['Cybersecurity', 'Cyber Sec'],
-    courseName: 'APCFCS'
+    courseName: ''
   }
 ];
 
@@ -44,7 +44,7 @@ function parseStudentSheetMappings(value) {
         aliases: Array.isArray(mapping?.aliases) ? mapping.aliases.map(normalizeText).filter(Boolean) : [],
         courseName: normalizeText(mapping?.courseName || mapping?.course)
       }))
-      .filter((mapping) => mapping.sheetName && mapping.courseName);
+      .filter((mapping) => mapping.sheetName);
   }
 
   const raw = normalizeText(value || process.env.STUDENT_SHEET_MAPPINGS);
@@ -62,7 +62,7 @@ function parseStudentSheetMappings(value) {
         const [sheetName, courseName] = entry.split('=').map(normalizeText);
         return { sheetName, aliases: [], courseName };
       })
-      .filter((mapping) => mapping.sheetName && mapping.courseName);
+      .filter((mapping) => mapping.sheetName);
   }
 }
 
@@ -113,6 +113,53 @@ function getRowValue(row, headerNames = []) {
   return match ? match[1] : '';
 }
 
+function normalizeStudentPaymentStatus(row) {
+  const statusValue = getRowValue(row, ['PAYMENT STATUS', 'FEE STATUS', 'FEES STATUS', 'PAYMENT', 'STATUS']);
+  const normalizedStatus = normalizeText(statusValue).toUpperCase();
+
+  if (normalizedStatus === 'CLOSED' || normalizedStatus === 'PAID' || normalizedStatus === 'COMPLETE' || normalizedStatus === 'COMPLETED') {
+    return 'FULLY PAID';
+  }
+
+  const paymentStatus = normalizePaymentStatus(statusValue);
+  if (paymentStatus !== 'DEFAULT' || normalizedStatus === 'DEFAULT') {
+    return paymentStatus;
+  }
+
+  const balanceText = normalizeText(getRowValue(row, ['BALANCE', 'BALANCE AMOUNT', 'PENDING AMOUNT']));
+  const balanceAmount = Number(balanceText.replace(/[^\d.-]/g, ''));
+  if (Number.isFinite(balanceAmount) && balanceAmount > 0) {
+    return 'PENDING';
+  }
+
+  return paymentStatus;
+}
+
+function normalizeBatchValue(value) {
+  return normalizeText(value)
+    .replace(/^DV[\s_-]*(?=\d)/i, '')
+    .replace(/\bDV\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseBatchNames(value) {
+  return Array.from(
+    new Set(
+      normalizeBatchValue(value)
+        .split(/[,;\n\r]+/)
+        .map(normalizeBatchValue)
+        .filter(Boolean)
+    )
+  );
+}
+
+function deriveYearFromBatch(batch) {
+  const normalizedBatch = normalizeBatchValue(batch);
+  const match = normalizedBatch.match(/^(\d{4})/);
+  return match ? match[1] : '';
+}
+
 function sheetToRows(workbook, sheetName) {
   const worksheet = workbook.Sheets[sheetName];
   if (!worksheet) {
@@ -134,15 +181,15 @@ function findMappedSheetName(workbook, mapping) {
 }
 
 function mapStudentRow(row, mappedCourseName = '') {
-  const lmsId = normalizeText(getRowValue(row, ['LMSID', 'LMS ID', 'LMS_ID', 'STUDENT ID', 'ID']));
-  const name = normalizeText(getRowValue(row, ['STUDENT NAME', 'NAME', 'STUDENT']));
-  const mobile = normalizeMobile(getRowValue(row, ['MOBILE', 'PHONE', 'PHONE NUMBER', 'CONTACT', 'CONTACT NUMBER']));
+  const lmsId = normalizeText(getRowValue(row, ['LMSID', 'LMS ID', 'LMS_ID', 'STUDENT ID', 'STU ID', 'STU_ID', 'ID']));
+  const name = normalizeText(getRowValue(row, ['STUDENT NAME', 'STUDENT', 'STU NAME', 'STU_NAME', 'NAME']));
+  const mobile = normalizeMobile(getRowValue(row, ['MOBILE', 'MOBILE 1', 'MOBILE-1', 'PHONE', 'PHONE NUMBER', 'CONTACT', 'CONTACT NUMBER']));
   const emailId = normalizeText(getRowValue(row, ['EMAIL ID', 'EMAIL', 'E-MAIL', 'MAIL ID'])).toLowerCase();
   const courseCell = normalizeText(getRowValue(row, ['COURSE', 'COURSE NAME', 'PROGRAM']));
-  const batch = normalizeText(getRowValue(row, ['BATCH', 'BATCH NAME']));
-  const batches = batch ? [batch] : [];
-  const year = normalizeText(getRowValue(row, ['YEAR', 'ACADEMIC YEAR']));
-  const paymentStatus = normalizePaymentStatus(getRowValue(row, ['PAYMENT STATUS', 'FEE STATUS', 'FEES STATUS', 'PAYMENT']));
+  const batches = parseBatchNames(getRowValue(row, ['BATCH', 'BATCH NAME', 'BATCH_1', 'BATCH YEARMONTH', 'BATCH_YEARMONTH']));
+  const batch = batches[0] || '';
+  const year = deriveYearFromBatch(batch) || normalizeText(getRowValue(row, ['YEAR', 'ACADEMIC YEAR']));
+  const paymentStatus = normalizeStudentPaymentStatus(row);
   const course = mappedCourseName
     ? [mappedCourseName]
     : courseCell.split(',').map((courseName) => normalizeText(courseName)).filter(Boolean);
@@ -285,11 +332,13 @@ async function syncStudentsFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH
   await dropLegacyPhoneIndexes();
   const students = await readStudentWorkbook(filePath, options);
   const lmsIds = students.map((student) => student.lmsId);
-  const mappedCourseNames = getStudentSheetMappings(options).map((mapping) => mapping.courseName).filter(Boolean);
   const shouldDeleteOnlyMappedCourses = options.useSheetMappings
     || isRemoteSource(filePath)
     || Boolean(extractGoogleSheetId(filePath))
     || Boolean(options.studentSheetMappings || options.sheetMappings);
+  const mappedCourseNames = shouldDeleteOnlyMappedCourses
+    ? Array.from(new Set(students.flatMap((student) => student.course).filter(Boolean)))
+    : getStudentSheetMappings(options).map((mapping) => mapping.courseName).filter(Boolean);
 
   if (students.length > 0) {
     await Student.bulkWrite(

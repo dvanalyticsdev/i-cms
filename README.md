@@ -67,10 +67,12 @@ npm start
 ## Google Sheet student sync
 The CMS can sync student data from the configured Google Sheet on startup, every 60 seconds, and manually from the Student Database admin tab.
 
-Default tab-to-course mapping:
-- `Gen AI & Adv AI` -> `Gen AI & Agentic AI`
-- `Data Scienece` / `Data Science` -> `DAS`
-- `Cyber Security` -> `APCFCS`
+Default synced tabs:
+- `Gen AI & Adv AI`
+- `Data Scienece` / `Data Science`
+- `Cyber Security`
+
+Each imported row uses the CMS course name from the sheet's `COURSE` column. Batch values are normalized by removing `DV`, splitting comma-separated batches, and deriving `year` from the first four digits of the primary batch.
 
 Optional environment variables:
 - `GOOGLE_STUDENT_SHEET_URL` or `GOOGLE_STUDENT_SHEET_ID` to point at a different spreadsheet
