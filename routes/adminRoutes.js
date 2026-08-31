@@ -18,7 +18,7 @@ const { normalizePaymentStatus, normalizeFeeStatusException } = require('../util
 const { getAutomatedSessionState, toValidDate, withEffectiveSessionStatus } = require('../utils/sessionAutomation');
 const CLASS_ACCESS_PAYMENT_STATUSES = ['DEFAULT', 'FULLY PAID', 'PENDING'];
 const SESSION_LOG_ALLOWED_ACTIONS = ['Created Session', 'Updated Session', 'Session Status Updated', 'Deleted Session'];
-const { syncWorkbookData } = require('../utils/workbookSync');
+const { syncWorkbookData, syncGoogleSheetData } = require('../utils/workbookSync');
 const XLSX = require('xlsx');
 const crypto = require('crypto');
 
@@ -1103,6 +1103,27 @@ router.post('/system-sync', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Error syncing workbook data:', error.message);
+    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+  }
+});
+
+/**
+ * POST /api/admin/google-sheet-sync
+ */
+router.post('/google-sheet-sync', authMiddleware, async (req, res) => {
+  try {
+    if (!ensureAdminRole(req, res)) {
+      return;
+    }
+
+    const summary = await syncGoogleSheetData(req.body || {});
+    return res.status(200).json({
+      success: true,
+      message: 'Google Sheet student data synced successfully',
+      summary
+    });
+  } catch (error) {
+    console.error('Error syncing Google Sheet student data:', error.message);
     return res.status(500).json({ success: false, message: error.message || 'Server error' });
   }
 });

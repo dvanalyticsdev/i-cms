@@ -9,6 +9,7 @@ const ActiveSession = require('./models/ActiveSession');
 const { ensureMongoConnection, isMongoConnected } = require('./utils/mongoConnection');
 const { autoFinalizeStaleSessions, closeAttendanceForActiveSession } = require('./utils/attendanceTracker');
 const { getAutomatedSessionState, getSessionAutomationSelectFields } = require('./utils/sessionAutomation');
+const { syncGoogleSheetData } = require('./utils/workbookSync');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -20,6 +21,12 @@ const issueRoutes = require('./routes/issueRoutes');
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
+const GOOGLE_STUDENT_SHEET_SYNC_INTERVAL_MS = Math.max(
+  parseInt(process.env.GOOGLE_STUDENT_SHEET_SYNC_INTERVAL_MS || '60000', 10),
+  30000
+);
+const GOOGLE_STUDENT_SHEET_SYNC_ENABLED = String(process.env.GOOGLE_STUDENT_SHEET_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
+let googleStudentSheetSyncInProgress = false;
 
 // Enable gzip/deflate response compression
 app.use(compression());
@@ -91,6 +98,25 @@ async function syncAutomatedSessionStatuses() {
         finalizedBy: 'session-automation'
       });
     }
+  }
+}
+
+async function syncGoogleStudentSheet(reason = 'scheduled') {
+  if (!GOOGLE_STUDENT_SHEET_SYNC_ENABLED || googleStudentSheetSyncInProgress) {
+    return;
+  }
+
+  googleStudentSheetSyncInProgress = true;
+
+  try {
+    const summary = await syncGoogleSheetData();
+    console.log(
+      `Google student sheet sync (${reason}) complete: ${summary.students.total} student(s), ${summary.courses.total} mapped course(s)`
+    );
+  } catch (error) {
+    console.error(`Error syncing Google student sheet (${reason}):`, error.message);
+  } finally {
+    googleStudentSheetSyncInProgress = false;
   }
 }
 
@@ -202,6 +228,7 @@ const initializeDatabase = async () => {
     // The timeout inside autoFinalizeStaleSessions is intentionally long so
     // an in-progress Zoom session is not ended after a brief heartbeat gap.
     await syncAutomatedSessionStatuses();
+    await syncGoogleStudentSheet('startup');
 
     setInterval(async () => {
       try {
@@ -222,6 +249,12 @@ const initializeDatabase = async () => {
         console.error('Error in automated session scheduler interval:', error.message);
       }
     }, 15000);
+
+    setInterval(async () => {
+      if (mongoose.connection.readyState === 1) {
+        await syncGoogleStudentSheet('scheduled');
+      }
+    }, GOOGLE_STUDENT_SHEET_SYNC_INTERVAL_MS);
     
   } catch (error) {
     console.error('✗ MongoDB connection failed:', error.message);

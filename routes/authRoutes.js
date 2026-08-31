@@ -18,7 +18,7 @@ function normalize(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-function resolvePaymentStatus(studentRecord, lmsId) {
+async function resolvePaymentStatus(studentRecord, lmsId) {
   const effectiveMongoStatus = String(getEffectivePaymentStatus(studentRecord) || '').trim().toUpperCase();
   if (effectiveMongoStatus && effectiveMongoStatus !== 'DEFAULT') {
     return effectiveMongoStatus;
@@ -29,7 +29,7 @@ function resolvePaymentStatus(studentRecord, lmsId) {
     return mongoStatus;
   }
 
-  const workbookStudent = findStudentInWorkbook(lmsId);
+  const workbookStudent = await findStudentInWorkbook(lmsId);
   return String(workbookStudent?.paymentStatus || '').trim().toUpperCase();
 }
 
@@ -90,7 +90,7 @@ router.post('/verify-student', async (req, res) => {
       });
     }
 
-    if (!isGuestMentorId && resolvePaymentStatus(userInfo, sanitizedLmsId) === 'DEFAULT') {
+    if (!isGuestMentorId && await resolvePaymentStatus(userInfo, sanitizedLmsId) === 'DEFAULT') {
       return res.status(403).json({
         success: false,
         feePending: true,
@@ -276,7 +276,7 @@ router.get('/session/:lmsId', async (req, res) => {
     }
 
     const studentRecord = await Student.findOne({ lmsId: lmsId.trim() }).lean();
-    if (studentRecord && resolvePaymentStatus(studentRecord, lmsId.trim()) === 'DEFAULT') {
+    if (studentRecord && await resolvePaymentStatus(studentRecord, lmsId.trim()) === 'DEFAULT') {
       if (sessionData.classSessionId) {
         try {
           await endActiveSession(sessionData, now, { reason: 'fee_blocked', finalizedBy: 'system' });

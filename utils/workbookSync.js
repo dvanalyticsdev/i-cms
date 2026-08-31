@@ -6,43 +6,238 @@ const { normalizeText, normalizePaymentStatus, normalizeAccessCell } = require('
 
 const DEFAULT_STUDENT_WORKBOOK_PATH = process.env.STUDENT_WORKBOOK_PATH || 'C:/Users/pushk/OneDrive/Documents/Student Database.xlsx';
 const DEFAULT_RULE_WORKBOOK_PATH = process.env.RULE_BOOK_PATH || 'C:/Users/pushk/OneDrive/Documents/Rule Book.xlsx';
+const DEFAULT_GOOGLE_STUDENT_SHEET_URL = process.env.GOOGLE_STUDENT_SHEET_URL
+  || process.env.GOOGLE_STUDENT_SHEET_ID
+  || 'https://docs.google.com/spreadsheets/d/1z7897mcMyPRWyvRiXG5tPziXkLnkaE_6/edit?gid=390642373#gid=390642373';
+
+const DEFAULT_STUDENT_SHEET_MAPPINGS = [
+  {
+    sheetName: 'Gen AI & Adv AI',
+    aliases: ['Gen AI & Agentic AI'],
+    courseName: 'Gen AI & Agentic AI'
+  },
+  {
+    sheetName: 'Data Scienece',
+    aliases: ['Data Science'],
+    courseName: 'DAS'
+  },
+  {
+    sheetName: 'Cyber Security',
+    aliases: ['Cybersecurity', 'Cyber Sec'],
+    courseName: 'APCFCS'
+  }
+];
 
 function normalizeMobile(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
-function readWorksheetRows(filePath) {
-  const workbook = XLSX.readFile(filePath);
-  const firstSheetName = workbook.SheetNames[0];
-  return XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], { defval: '' });
+function normalizeHeader(value) {
+  return normalizeText(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-function readStudentWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH) {
-  return readWorksheetRows(filePath).map((row) => ({
-    lmsId: normalizeText(row.LMSID),
-    name: normalizeText(row['STUDENT NAME']),
-    mobile: normalizeMobile(row.MOBILE),
-    emailId: normalizeText(row['EMAIL ID']).toLowerCase(),
-    course: normalizeText(row.Course).split(',').map((c) => c.trim()).filter(Boolean),
-    batch: normalizeText(row.BATCH),
-    batches: normalizeText(row.BATCH) ? [normalizeText(row.BATCH)] : [],
-    year: normalizeText(row.YEAR),
-    paymentStatus: normalizePaymentStatus(row['PAYMENT STATUS'])
-  })).filter((row) => row.lmsId && row.name && row.course.length > 0 && row.batch);
+function parseStudentSheetMappings(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((mapping) => ({
+        sheetName: normalizeText(mapping?.sheetName || mapping?.sheet || mapping?.tab),
+        aliases: Array.isArray(mapping?.aliases) ? mapping.aliases.map(normalizeText).filter(Boolean) : [],
+        courseName: normalizeText(mapping?.courseName || mapping?.course)
+      }))
+      .filter((mapping) => mapping.sheetName && mapping.courseName);
+  }
+
+  const raw = normalizeText(value || process.env.STUDENT_SHEET_MAPPINGS);
+  if (!raw) {
+    return DEFAULT_STUDENT_SHEET_MAPPINGS;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parseStudentSheetMappings(parsed);
+  } catch (error) {
+    return raw
+      .split(';')
+      .map((entry) => {
+        const [sheetName, courseName] = entry.split('=').map(normalizeText);
+        return { sheetName, aliases: [], courseName };
+      })
+      .filter((mapping) => mapping.sheetName && mapping.courseName);
+  }
 }
 
-function findStudentInWorkbook(lmsId, filePath = DEFAULT_STUDENT_WORKBOOK_PATH) {
+function getStudentSheetMappings(options = {}) {
+  return parseStudentSheetMappings(options.studentSheetMappings || options.sheetMappings);
+}
+
+function extractGoogleSheetId(source) {
+  const value = normalizeText(source);
+  const match = value.match(/\/spreadsheets\/d\/([^/]+)/) || value.match(/^[a-zA-Z0-9_-]{20,}$/);
+  return match ? match[1] || match[0] : '';
+}
+
+function isRemoteSource(source) {
+  return /^https?:\/\//i.test(normalizeText(source));
+}
+
+function resolveGoogleSheetExportUrl(source) {
+  const sheetId = extractGoogleSheetId(source);
+  if (!sheetId) {
+    return normalizeText(source);
+  }
+
+  return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`;
+}
+
+async function readWorkbook(source) {
+  if (isRemoteSource(source) || extractGoogleSheetId(source)) {
+    if (typeof fetch !== 'function') {
+      throw new Error('Google Sheet sync requires Node.js 18 or newer for fetch support');
+    }
+
+    const response = await fetch(resolveGoogleSheetExportUrl(source));
+    if (!response.ok) {
+      throw new Error(`Could not download Google Sheet workbook (${response.status} ${response.statusText})`);
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return XLSX.read(buffer, { type: 'buffer' });
+  }
+
+  return XLSX.readFile(source);
+}
+
+function getRowValue(row, headerNames = []) {
+  const headerSet = new Set(headerNames.map(normalizeHeader));
+  const match = Object.entries(row).find(([key]) => headerSet.has(normalizeHeader(key)));
+  return match ? match[1] : '';
+}
+
+function sheetToRows(workbook, sheetName) {
+  const worksheet = workbook.Sheets[sheetName];
+  if (!worksheet) {
+    return [];
+  }
+
+  return XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+}
+
+function findMappedSheetName(workbook, mapping) {
+  const sheetNames = workbook.SheetNames || [];
+  const wantedNames = [mapping.sheetName, ...(mapping.aliases || [])]
+    .map(normalizeText)
+    .filter(Boolean);
+
+  return sheetNames.find((sheetName) =>
+    wantedNames.some((wantedName) => sheetName.toLowerCase() === wantedName.toLowerCase())
+  ) || '';
+}
+
+function mapStudentRow(row, mappedCourseName = '') {
+  const lmsId = normalizeText(getRowValue(row, ['LMSID', 'LMS ID', 'LMS_ID', 'STUDENT ID', 'ID']));
+  const name = normalizeText(getRowValue(row, ['STUDENT NAME', 'NAME', 'STUDENT']));
+  const mobile = normalizeMobile(getRowValue(row, ['MOBILE', 'PHONE', 'PHONE NUMBER', 'CONTACT', 'CONTACT NUMBER']));
+  const emailId = normalizeText(getRowValue(row, ['EMAIL ID', 'EMAIL', 'E-MAIL', 'MAIL ID'])).toLowerCase();
+  const courseCell = normalizeText(getRowValue(row, ['COURSE', 'COURSE NAME', 'PROGRAM']));
+  const batch = normalizeText(getRowValue(row, ['BATCH', 'BATCH NAME']));
+  const batches = batch ? [batch] : [];
+  const year = normalizeText(getRowValue(row, ['YEAR', 'ACADEMIC YEAR']));
+  const paymentStatus = normalizePaymentStatus(getRowValue(row, ['PAYMENT STATUS', 'FEE STATUS', 'FEES STATUS', 'PAYMENT']));
+  const course = mappedCourseName
+    ? [mappedCourseName]
+    : courseCell.split(',').map((courseName) => normalizeText(courseName)).filter(Boolean);
+
+  return {
+    lmsId,
+    name,
+    mobile,
+    emailId,
+    course,
+    batch,
+    batches,
+    year,
+    paymentStatus
+  };
+}
+
+function mergeStudentRecords(students = []) {
+  const byLmsId = new Map();
+
+  students.forEach((student) => {
+    if (!student.lmsId || !student.name || student.course.length === 0 || student.batches.length === 0) {
+      return;
+    }
+
+    const current = byLmsId.get(student.lmsId);
+    if (!current) {
+      byLmsId.set(student.lmsId, { ...student });
+      return;
+    }
+
+    const courses = Array.from(new Set([...current.course, ...student.course].filter(Boolean)));
+    const batches = Array.from(new Set([...current.batches, ...student.batches].filter(Boolean)));
+
+    byLmsId.set(student.lmsId, {
+      ...current,
+      ...student,
+      course: courses,
+      batch: batches[0],
+      batches
+    });
+  });
+
+  return Array.from(byLmsId.values());
+}
+
+async function readStudentWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH, options = {}) {
+  const workbook = await readWorkbook(filePath);
+  const mappings = getStudentSheetMappings(options);
+  const shouldUseMappedSheets = options.useSheetMappings
+    || isRemoteSource(filePath)
+    || Boolean(extractGoogleSheetId(filePath))
+    || Boolean(options.studentSheetMappings || options.sheetMappings);
+
+  if (!shouldUseMappedSheets) {
+    const firstSheetName = workbook.SheetNames[0];
+    return mergeStudentRecords(sheetToRows(workbook, firstSheetName).map((row) => mapStudentRow(row)));
+  }
+
+  const missingSheets = [];
+  const mappedStudents = mappings.flatMap((mapping) => {
+    const actualSheetName = findMappedSheetName(workbook, mapping);
+    if (!actualSheetName) {
+      missingSheets.push(mapping.sheetName);
+      return [];
+    }
+
+    return sheetToRows(workbook, actualSheetName).map((row) => mapStudentRow(row, mapping.courseName));
+  });
+
+  if (missingSheets.length > 0) {
+    throw new Error(`Mapped student sheet tab(s) not found: ${missingSheets.join(', ')}`);
+  }
+
+  return mergeStudentRecords(mappedStudents);
+}
+
+async function findStudentInWorkbook(lmsId, filePath = DEFAULT_STUDENT_WORKBOOK_PATH, options = {}) {
   const normalizedLmsId = normalizeText(lmsId);
   if (!normalizedLmsId) {
     return null;
   }
 
   try {
-    const students = readStudentWorkbook(filePath);
+    const students = await readStudentWorkbook(filePath, options);
     return students.find((student) => student.lmsId === normalizedLmsId) || null;
   } catch (error) {
     return null;
   }
+}
+
+function readWorksheetRows(filePath) {
+  const workbook = XLSX.readFile(filePath);
+  const firstSheetName = workbook.SheetNames[0];
+  return XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], { defval: '' });
 }
 
 function readRuleWorkbook(filePath = DEFAULT_RULE_WORKBOOK_PATH) {
@@ -86,10 +281,15 @@ async function dropLegacyPhoneIndexes() {
   }));
 }
 
-async function syncStudentsFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH) {
+async function syncStudentsFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH, options = {}) {
   await dropLegacyPhoneIndexes();
-  const students = readStudentWorkbook(filePath);
+  const students = await readStudentWorkbook(filePath, options);
   const lmsIds = students.map((student) => student.lmsId);
+  const mappedCourseNames = getStudentSheetMappings(options).map((mapping) => mapping.courseName).filter(Boolean);
+  const shouldDeleteOnlyMappedCourses = options.useSheetMappings
+    || isRemoteSource(filePath)
+    || Boolean(extractGoogleSheetId(filePath))
+    || Boolean(options.studentSheetMappings || options.sheetMappings);
 
   if (students.length > 0) {
     await Student.bulkWrite(
@@ -105,16 +305,20 @@ async function syncStudentsFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH
   }
 
   if (lmsIds.length > 0) {
-    await Student.deleteMany({ lmsId: { $nin: lmsIds } });
+    const deleteFilter = shouldDeleteOnlyMappedCourses
+      ? { lmsId: { $nin: lmsIds }, course: { $in: mappedCourseNames } }
+      : { lmsId: { $nin: lmsIds } };
+    await Student.deleteMany(deleteFilter);
   }
 
   return {
-    total: students.length
+    total: students.length,
+    mappedCourses: shouldDeleteOnlyMappedCourses ? mappedCourseNames : []
   };
 }
 
-async function syncCoursesFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH) {
-  const students = readStudentWorkbook(filePath);
+async function syncCoursesFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH, options = {}) {
+  const students = await readStudentWorkbook(filePath, options);
   const courseNames = Array.from(new Set(students.flatMap((student) => student.course).filter(Boolean))).sort();
 
   if (courseNames.length > 0) {
@@ -123,13 +327,11 @@ async function syncCoursesFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH)
         updateOne: {
           filter: { courseName },
           update: {
-            $set: {
+            $setOnInsert: {
               courseName,
               description: '',
               category: 'Workbook Import',
-              status: 'active'
-            },
-            $setOnInsert: {
+              status: 'active',
               createdBy: 'workbook-import'
             }
           },
@@ -140,13 +342,28 @@ async function syncCoursesFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH)
     );
   }
 
-  if (courseNames.length > 0) {
-    await Course.deleteMany({ courseName: { $nin: courseNames } });
+  if (courseNames.length > 0 && !options.useSheetMappings && !isRemoteSource(filePath) && !extractGoogleSheetId(filePath)) {
+    await Course.deleteMany({ courseName: { $nin: courseNames }, createdBy: 'workbook-import' });
   }
 
   return {
     total: courseNames.length,
     courseNames
+  };
+}
+
+async function syncStudentWorkbookData(options = {}) {
+  const studentWorkbookPath = options.studentWorkbookPath || DEFAULT_STUDENT_WORKBOOK_PATH;
+
+  const [students, courses] = await Promise.all([
+    syncStudentsFromWorkbook(studentWorkbookPath, options),
+    syncCoursesFromWorkbook(studentWorkbookPath, options)
+  ]);
+
+  return {
+    students,
+    courses,
+    studentWorkbookPath
   };
 }
 
@@ -189,8 +406,8 @@ async function syncWorkbookData(options = {}) {
   const ruleWorkbookPath = options.ruleWorkbookPath || DEFAULT_RULE_WORKBOOK_PATH;
 
   const [students, courses, rules] = await Promise.all([
-    syncStudentsFromWorkbook(studentWorkbookPath),
-    syncCoursesFromWorkbook(studentWorkbookPath),
+    syncStudentsFromWorkbook(studentWorkbookPath, options),
+    syncCoursesFromWorkbook(studentWorkbookPath, options),
     syncClassAccessRulesFromWorkbook(ruleWorkbookPath)
   ]);
 
@@ -203,11 +420,25 @@ async function syncWorkbookData(options = {}) {
   };
 }
 
+async function syncGoogleSheetData(options = {}) {
+  const studentWorkbookPath = options.studentWorkbookPath || options.googleSheetUrl || DEFAULT_GOOGLE_STUDENT_SHEET_URL;
+  return syncStudentWorkbookData({
+    ...options,
+    studentWorkbookPath,
+    useSheetMappings: true
+  });
+}
+
 module.exports = {
   DEFAULT_STUDENT_WORKBOOK_PATH,
   DEFAULT_RULE_WORKBOOK_PATH,
+  DEFAULT_GOOGLE_STUDENT_SHEET_URL,
+  DEFAULT_STUDENT_SHEET_MAPPINGS,
+  extractGoogleSheetId,
   readStudentWorkbook,
   findStudentInWorkbook,
   readRuleWorkbook,
-  syncWorkbookData
+  syncStudentWorkbookData,
+  syncWorkbookData,
+  syncGoogleSheetData
 };

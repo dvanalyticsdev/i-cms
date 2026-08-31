@@ -2726,6 +2726,51 @@ async function confirmRevoke() {
 // STUDENT DATABASE MANAGEMENT
 // ====================================
 
+async function syncGoogleStudentSheet() {
+    const syncButton = document.getElementById('syncGoogleSheetButton');
+    const syncText = document.getElementById('syncGoogleSheetText');
+    const originalText = syncText ? syncText.textContent : 'Sync Google Sheet';
+
+    try {
+        if (syncButton) syncButton.disabled = true;
+        if (syncText) syncText.textContent = 'Syncing...';
+
+        const response = await fetch(`${API_BASE_URL}/google-sheet-sync`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.message || 'Failed to sync Google Sheet');
+        }
+
+        const total = data.summary?.students?.total || 0;
+        showToast(`Google Sheet synced: ${total} student(s) updated`, 'success');
+
+        await Promise.all([
+            loadCourses(),
+            loadStudentBatches(),
+            loadStudentYears(),
+            loadStudents(studentPageMeta.page)
+        ]);
+    } catch (error) {
+        console.error('Error syncing Google Sheet:', error);
+        showToast(error.message || 'Error syncing Google Sheet', 'error');
+    } finally {
+        if (syncButton) syncButton.disabled = false;
+        if (syncText) syncText.textContent = originalText;
+    }
+}
+
 /**
  * Load students with pagination and filtering
  */

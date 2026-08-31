@@ -64,6 +64,20 @@ Start the server:
 npm start
 ```
 
+## Google Sheet student sync
+The CMS can sync student data from the configured Google Sheet on startup, every 60 seconds, and manually from the Student Database admin tab.
+
+Default tab-to-course mapping:
+- `Gen AI & Adv AI` -> `Gen AI & Agentic AI`
+- `Data Scienece` / `Data Science` -> `DAS`
+- `Cyber Security` -> `APCFCS`
+
+Optional environment variables:
+- `GOOGLE_STUDENT_SHEET_URL` or `GOOGLE_STUDENT_SHEET_ID` to point at a different spreadsheet
+- `STUDENT_SHEET_MAPPINGS` to override mappings, either as JSON or `Sheet=Course;Sheet 2=Course 2`
+- `GOOGLE_STUDENT_SHEET_SYNC_INTERVAL_MS` to change the polling interval, minimum 30000
+- `GOOGLE_STUDENT_SHEET_SYNC_ENABLED=false` to disable automatic polling
+
 ## Project structure
 - `server.js` - Express entry point
 - `routes/` - route modules
