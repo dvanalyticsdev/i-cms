@@ -4,9 +4,14 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 const XLSX = require('xlsx');
+const Student = require('../models/Student');
+const Course = require('../models/Course');
+const ClassAccessRule = require('../models/ClassAccessRule');
 const {
   DEFAULT_STUDENT_SHEET_MAPPINGS,
   extractGoogleSheetId,
+  filterStudentsByAllowedCourses,
+  syncStudentWorkbookData,
   readStudentWorkbook
 } = require('../utils/workbookSync');
 
@@ -96,6 +101,115 @@ test('readStudentWorkbook maps configured tabs and uses row CMS course names', a
     assert.strictEqual(students.find((student) => student.lmsId === 'LMS002').paymentStatus, 'PENDING');
     assert.strictEqual(students.find((student) => student.lmsId === 'LMS003').batch, '202408');
   } finally {
+    fs.rmSync(filePath, { force: true });
+  }
+});
+
+test('filterStudentsByAllowedCourses keeps only admin-created courses', () => {
+  const result = filterStudentsByAllowedCourses(
+    [
+      { lmsId: 'LMS001', course: ['APIDS', 'Unknown Course'] },
+      { lmsId: 'LMS002', course: ['Not Listed'] },
+      { lmsId: 'LMS003', course: ['gen ai & agentic ai'] }
+    ],
+    ['APIDS', 'Gen AI & Agentic AI']
+  );
+
+  assert.deepStrictEqual(
+    result.students.map((student) => ({ lmsId: student.lmsId, course: student.course })),
+    [
+      { lmsId: 'LMS001', course: ['APIDS'] },
+      { lmsId: 'LMS003', course: ['Gen AI & Agentic AI'] }
+    ]
+  );
+  assert.deepStrictEqual(result.allowedCourseNames, ['APIDS', 'Gen AI & Agentic AI']);
+  assert.deepStrictEqual(result.skippedCourseNames, ['Not Listed', 'Unknown Course']);
+});
+
+test('restricted sync imports only existing courses and does not create sheet courses', async () => {
+  const filePath = writeWorkbook({
+    Students: [
+      {
+        LMSID: 'LMS001',
+        'STUDENT NAME': 'Allowed Student',
+        MOBILE: '98765 43210',
+        BATCH: 'DV 202604',
+        COURSE: 'APIDS',
+        STATUS: 'CLOSED'
+      },
+      {
+        LMSID: 'LMS002',
+        'STUDENT NAME': 'Unknown Student',
+        MOBILE: '88888 77777',
+        BATCH: 'DV 202605',
+        COURSE: 'Sheet Only Course',
+        STATUS: 'CLOSED'
+      },
+      {
+        LMSID: 'LMS003',
+        'STUDENT NAME': 'Mixed Student',
+        MOBILE: '99999 11111',
+        BATCH: 'DV 202606',
+        COURSE: 'APIDS, Sheet Only Course',
+        STATUS: 'CLOSED'
+      }
+    ]
+  });
+
+  const originalCourseFind = Course.find;
+  const originalCourseBulkWrite = Course.bulkWrite;
+  const originalStudentBulkWrite = Student.bulkWrite;
+  const originalStudentDeleteMany = Student.deleteMany;
+  const originalStudentIndexes = Student.collection.indexes;
+  const originalClassAccessRuleIndexes = ClassAccessRule.collection.indexes;
+
+  const writtenStudents = [];
+  let courseBulkWriteCalled = false;
+  let deleteFilter = null;
+
+  Course.find = () => ({
+    lean: async () => [{ courseName: 'APIDS' }]
+  });
+  Course.bulkWrite = async () => {
+    courseBulkWriteCalled = true;
+  };
+  Student.bulkWrite = async (operations) => {
+    writtenStudents.push(...operations.map((operation) => operation.updateOne.update.$set));
+  };
+  Student.deleteMany = async (filter) => {
+    deleteFilter = filter;
+  };
+  Student.collection.indexes = async () => [];
+  ClassAccessRule.collection.indexes = async () => [];
+
+  try {
+    const summary = await syncStudentWorkbookData({
+      studentWorkbookPath: filePath,
+      restrictToExistingCourses: true
+    });
+
+    assert.strictEqual(summary.students.sourceTotal, 3);
+    assert.strictEqual(summary.students.total, 2);
+    assert.strictEqual(summary.students.skippedTotal, 1);
+    assert.deepStrictEqual(summary.students.acceptedCourses, ['APIDS']);
+    assert.deepStrictEqual(summary.students.skippedCourses, ['Sheet Only Course']);
+    assert.deepStrictEqual(writtenStudents.map((student) => student.lmsId).sort(), ['LMS001', 'LMS003']);
+    assert.deepStrictEqual(writtenStudents.find((student) => student.lmsId === 'LMS003').course, ['APIDS']);
+    assert.deepStrictEqual(summary.courses.courseNames, ['APIDS']);
+    assert.deepStrictEqual(summary.courses.skippedCourseNames, ['Sheet Only Course']);
+    assert.strictEqual(summary.courses.created, 0);
+    assert.strictEqual(courseBulkWriteCalled, false);
+    assert.deepStrictEqual(deleteFilter, {
+      lmsId: { $nin: ['LMS001', 'LMS003'] },
+      course: { $in: ['APIDS', 'Sheet Only Course'] }
+    });
+  } finally {
+    Course.find = originalCourseFind;
+    Course.bulkWrite = originalCourseBulkWrite;
+    Student.bulkWrite = originalStudentBulkWrite;
+    Student.deleteMany = originalStudentDeleteMany;
+    Student.collection.indexes = originalStudentIndexes;
+    ClassAccessRule.collection.indexes = originalClassAccessRuleIndexes;
     fs.rmSync(filePath, { force: true });
   }
 });

@@ -878,22 +878,55 @@ function toggleStudentBatchSelection(input) {
     }
 }
 
-function addCustomStudentBatch() {
+function selectCustomStudentBatch(value) {
+    const batch = String(value || '').trim();
+    if (!batch) {
+        return false;
+    }
+
+    const existingBatch = availableBatches.find(item => item.toLowerCase() === batch.toLowerCase());
+    const selectedBatch = existingBatch || batch;
+
+    if (!existingBatch) {
+        availableBatches = [...availableBatches, selectedBatch].sort((left, right) => left.localeCompare(right));
+    }
+
+    studentBatchSelection.add(selectedBatch);
+    renderStudentBatchOptions();
+    return true;
+}
+
+function addCustomStudentBatch(value = null) {
     const searchInput = document.getElementById('studentBatchSearch');
-    const value = searchInput?.value?.trim();
+    const batchValue = value !== null ? value : searchInput?.value;
+    const added = selectCustomStudentBatch(batchValue);
+
+    if (added && searchInput) {
+        searchInput.value = '';
+    }
+}
+
+function addCustomStudentBatchFromInput() {
+    const customInput = document.getElementById('studentCustomBatch');
+    const value = customInput?.value?.trim();
     if (!value) {
+        showToast('Enter a batch name to add', 'error');
         return;
     }
 
-    if (!availableBatches.includes(value)) {
-        availableBatches = [...availableBatches, value].sort((left, right) => left.localeCompare(right));
+    if (selectCustomStudentBatch(value)) {
+        customInput.value = '';
+        showToast('Custom batch added', 'success');
+    }
+}
+
+function handleCustomStudentBatchKeydown(event) {
+    if (event.key !== 'Enter') {
+        return;
     }
 
-    studentBatchSelection.add(value);
-    if (searchInput) {
-        searchInput.value = '';
-    }
-    renderStudentBatchOptions();
+    event.preventDefault();
+    addCustomStudentBatchFromInput();
 }
 
 function renderStudentBatchOptions(selectedBatches = null) {
@@ -3351,6 +3384,10 @@ function openAddStudentModal() {
     if (studentBatchSearch) {
         studentBatchSearch.value = '';
     }
+    const studentCustomBatch = document.getElementById('studentCustomBatch');
+    if (studentCustomBatch) {
+        studentCustomBatch.value = '';
+    }
     document.getElementById('studentName').value = '';
     document.getElementById('studentEmailId').value = '';
     document.getElementById('studentYear').value = '';
@@ -3379,6 +3416,10 @@ function openEditStudentModal(lmsId) {
     const studentBatchSearch = document.getElementById('studentBatchSearch');
     if (studentBatchSearch) {
         studentBatchSearch.value = '';
+    }
+    const studentCustomBatch = document.getElementById('studentCustomBatch');
+    if (studentCustomBatch) {
+        studentCustomBatch.value = '';
     }
     document.getElementById('studentName').value = student.name;
     document.getElementById('studentEmailId').value = student.emailId || '';

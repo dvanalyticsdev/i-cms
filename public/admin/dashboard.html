@@ -1272,6 +1272,18 @@
                             placeholder="Search batches..."
                             oninput="renderStudentBatchOptions()"
                         >
+                        <div class="custom-batch-row">
+                            <input
+                                type="text"
+                                id="studentCustomBatch"
+                                class="form-input"
+                                placeholder="Enter custom batch"
+                                onkeydown="handleCustomStudentBatchKeydown(event)"
+                            >
+                            <button type="button" class="btn btn-secondary" onclick="addCustomStudentBatchFromInput()">
+                                <span>Add</span>
+                            </button>
+                        </div>
                         <div id="studentBatchContainer" class="courses-container selection-list">
                             <p style="color: #999; font-size: 12px;">Loading batches...</p>
                         </div>

@@ -2219,6 +2219,22 @@ body.nav-open {
     width: 100%;
 }
 
+.custom-batch-row {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+    margin: 10px 0;
+}
+
+.custom-batch-row .form-input {
+    min-width: 0;
+    flex: 1;
+}
+
+.custom-batch-row .btn {
+    flex: 0 0 auto;
+}
+
 .table-container,
 .risk-panel,
 .export-panel,

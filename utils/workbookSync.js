@@ -236,6 +236,63 @@ function mergeStudentRecords(students = []) {
   return Array.from(byLmsId.values());
 }
 
+function normalizeCourseKey(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+function filterStudentsByAllowedCourses(students = [], courseNames = []) {
+  const allowedCourseByKey = new Map(
+    courseNames
+      .map((courseName) => normalizeText(courseName))
+      .filter(Boolean)
+      .map((courseName) => [normalizeCourseKey(courseName), courseName])
+  );
+
+  const skippedCourseNames = new Set();
+
+  const filteredStudents = students
+    .map((student) => {
+      const allowedCourses = [];
+
+      (student.course || []).forEach((courseName) => {
+        const normalizedCourseName = normalizeText(courseName);
+        if (!normalizedCourseName) {
+          return;
+        }
+
+        const allowedCourseName = allowedCourseByKey.get(normalizeCourseKey(normalizedCourseName));
+        if (allowedCourseName) {
+          allowedCourses.push(allowedCourseName);
+          return;
+        }
+
+        skippedCourseNames.add(normalizedCourseName);
+      });
+
+      const course = Array.from(new Set(allowedCourses));
+      if (course.length === 0) {
+        return null;
+      }
+
+      return {
+        ...student,
+        course
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    students: filteredStudents,
+    allowedCourseNames: Array.from(new Set(filteredStudents.flatMap((student) => student.course))).sort(),
+    skippedCourseNames: Array.from(skippedCourseNames).sort()
+  };
+}
+
+async function getExistingCourseNames() {
+  const courses = await Course.find({}, { courseName: 1 }).lean();
+  return courses.map((course) => normalizeText(course.courseName)).filter(Boolean);
+}
+
 async function readStudentWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH, options = {}) {
   const workbook = await readWorkbook(filePath);
   const mappings = getStudentSheetMappings(options);
@@ -330,15 +387,28 @@ async function dropLegacyPhoneIndexes() {
 
 async function syncStudentsFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH, options = {}) {
   await dropLegacyPhoneIndexes();
-  const students = await readStudentWorkbook(filePath, options);
+  const workbookStudents = await readStudentWorkbook(filePath, options);
+  const existingCourseNames = options.restrictToExistingCourses ? await getExistingCourseNames() : [];
+  const courseFilter = options.restrictToExistingCourses
+    ? filterStudentsByAllowedCourses(workbookStudents, existingCourseNames)
+    : {
+      students: workbookStudents,
+      allowedCourseNames: [],
+      skippedCourseNames: []
+    };
+  const students = courseFilter.students;
   const lmsIds = students.map((student) => student.lmsId);
-  const shouldDeleteOnlyMappedCourses = options.useSheetMappings
+  const shouldDeleteOnlyMappedCourses = options.restrictToExistingCourses
+    || options.useSheetMappings
     || isRemoteSource(filePath)
     || Boolean(extractGoogleSheetId(filePath))
     || Boolean(options.studentSheetMappings || options.sheetMappings);
-  const mappedCourseNames = shouldDeleteOnlyMappedCourses
-    ? Array.from(new Set(students.flatMap((student) => student.course).filter(Boolean)))
-    : getStudentSheetMappings(options).map((mapping) => mapping.courseName).filter(Boolean);
+  const workbookCourseNames = Array.from(new Set(workbookStudents.flatMap((student) => student.course).filter(Boolean)));
+  const mappedCourseNames = options.restrictToExistingCourses
+    ? Array.from(new Set([...courseFilter.allowedCourseNames, ...courseFilter.skippedCourseNames])).sort()
+    : shouldDeleteOnlyMappedCourses
+      ? Array.from(new Set(students.flatMap((student) => student.course).filter(Boolean)))
+      : getStudentSheetMappings(options).map((mapping) => mapping.courseName).filter(Boolean);
 
   if (students.length > 0) {
     await Student.bulkWrite(
@@ -353,22 +423,50 @@ async function syncStudentsFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH
     );
   }
 
-  if (lmsIds.length > 0) {
+  if (lmsIds.length > 0 || (shouldDeleteOnlyMappedCourses && mappedCourseNames.length > 0)) {
     const deleteFilter = shouldDeleteOnlyMappedCourses
-      ? { lmsId: { $nin: lmsIds }, course: { $in: mappedCourseNames } }
+      ? {
+        ...(lmsIds.length > 0 ? { lmsId: { $nin: lmsIds } } : {}),
+        course: { $in: mappedCourseNames }
+      }
       : { lmsId: { $nin: lmsIds } };
     await Student.deleteMany(deleteFilter);
   }
 
   return {
     total: students.length,
-    mappedCourses: shouldDeleteOnlyMappedCourses ? mappedCourseNames : []
+    sourceTotal: workbookStudents.length,
+    skippedTotal: workbookStudents.length - students.length,
+    mappedCourses: shouldDeleteOnlyMappedCourses ? mappedCourseNames : [],
+    acceptedCourses: options.restrictToExistingCourses ? courseFilter.allowedCourseNames : [],
+    skippedCourses: options.restrictToExistingCourses ? courseFilter.skippedCourseNames : [],
+    sourceCourses: options.restrictToExistingCourses ? workbookCourseNames.sort() : []
   };
 }
 
 async function syncCoursesFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH, options = {}) {
   const students = await readStudentWorkbook(filePath, options);
   const courseNames = Array.from(new Set(students.flatMap((student) => student.course).filter(Boolean))).sort();
+
+  if (options.restrictToExistingCourses) {
+    const existingCourseNames = await getExistingCourseNames();
+    const existingCourseByKey = new Map(existingCourseNames.map((courseName) => [normalizeCourseKey(courseName), courseName]));
+    const acceptedCourseNames = Array.from(new Set(
+      courseNames
+        .map((courseName) => existingCourseByKey.get(normalizeCourseKey(courseName)))
+        .filter(Boolean)
+    )).sort();
+    const skippedCourseNames = courseNames
+      .filter((courseName) => !existingCourseByKey.has(normalizeCourseKey(courseName)))
+      .sort();
+
+    return {
+      total: acceptedCourseNames.length,
+      courseNames: acceptedCourseNames,
+      skippedCourseNames,
+      created: 0
+    };
+  }
 
   if (courseNames.length > 0) {
     await Course.bulkWrite(
@@ -397,7 +495,8 @@ async function syncCoursesFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH,
 
   return {
     total: courseNames.length,
-    courseNames
+    courseNames,
+    created: courseNames.length
   };
 }
 
@@ -474,7 +573,8 @@ async function syncGoogleSheetData(options = {}) {
   return syncStudentWorkbookData({
     ...options,
     studentWorkbookPath,
-    useSheetMappings: true
+    useSheetMappings: true,
+    restrictToExistingCourses: true
   });
 }
 
@@ -484,6 +584,7 @@ module.exports = {
   DEFAULT_GOOGLE_STUDENT_SHEET_URL,
   DEFAULT_STUDENT_SHEET_MAPPINGS,
   extractGoogleSheetId,
+  filterStudentsByAllowedCourses,
   readStudentWorkbook,
   findStudentInWorkbook,
   readRuleWorkbook,
