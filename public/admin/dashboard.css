@@ -2235,6 +2235,28 @@ body.nav-open {
     flex: 0 0 auto;
 }
 
+.selected-batch-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.selected-batch-pill {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    background: var(--surface-muted);
+    font-size: 12px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
 .table-container,
 .risk-panel,
 .export-panel,

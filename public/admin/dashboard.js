@@ -892,7 +892,6 @@ function selectCustomStudentBatch(value) {
     }
 
     studentBatchSelection.add(selectedBatch);
-    renderStudentBatchOptions();
     return true;
 }
 
@@ -901,8 +900,11 @@ function addCustomStudentBatch(value = null) {
     const batchValue = value !== null ? value : searchInput?.value;
     const added = selectCustomStudentBatch(batchValue);
 
-    if (added && searchInput) {
-        searchInput.value = '';
+    if (added) {
+        if (searchInput) {
+            searchInput.value = '';
+        }
+        renderStudentBatchOptions();
     }
 }
 
@@ -916,6 +918,11 @@ function addCustomStudentBatchFromInput() {
 
     if (selectCustomStudentBatch(value)) {
         customInput.value = '';
+        const searchInput = document.getElementById('studentBatchSearch');
+        if (searchInput) {
+            searchInput.value = '';
+        }
+        renderStudentBatchOptions();
         showToast('Custom batch added', 'success');
     }
 }
@@ -942,16 +949,28 @@ function renderStudentBatchOptions(selectedBatches = null) {
         .sort((left, right) => left.localeCompare(right))
         .filter(batch => !searchTerm || batch.toLowerCase().includes(searchTerm));
 
+    const selectedMarkup = Array.from(selectedSet).length > 0
+        ? `
+            <div class="selected-batch-summary">
+                ${Array.from(selectedSet).map(batch => `<span class="selected-batch-pill">${escapeHtml(batch)}</span>`).join('')}
+            </div>
+        `
+        : '';
+
     if (batches.length === 0) {
         const pendingValue = (document.getElementById('studentBatchSearch')?.value || '').trim();
         container.innerHTML = pendingValue
             ? `
                 <div style="display: flex; flex-direction: column; gap: 10px;">
+                    ${selectedMarkup}
                     <p style="color: #999; font-size: 12px;">No batches match your search.</p>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="addCustomStudentBatch()">Add "${escapeHtml(pendingValue)}"</button>
                 </div>
             `
-            : '<p style="color: #999; font-size: 12px;">No batches match your search.</p>';
+            : `
+                ${selectedMarkup}
+                <p style="color: #999; font-size: 12px;">No batches match your search.</p>
+            `;
         return;
     }
 
@@ -970,6 +989,7 @@ function renderStudentBatchOptions(selectedBatches = null) {
 
     container.innerHTML = `
         <div style="display: flex; flex-direction: column; gap: 8px;">
+            ${selectedMarkup}
             ${addButtonMarkup}
             ${listMarkup}
         </div>

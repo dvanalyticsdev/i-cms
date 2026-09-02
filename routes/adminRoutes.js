@@ -1652,7 +1652,8 @@ router.post('/students', authMiddleware, async (req, res) => {
       course: coursesArray,
       year: normalizeText(year),
       paymentStatus: normalizePaymentStatus(paymentStatus),
-      feeStatusException: normalizeFeeStatusException(feeStatusException)
+      feeStatusException: normalizeFeeStatusException(feeStatusException),
+      manualAccessOverride: true
     });
     
     await newStudent.save();
@@ -1702,7 +1703,8 @@ router.put('/students/:lmsId', authMiddleware, async (req, res) => {
         course: coursesArray,
         year: normalizeText(year),
         paymentStatus: normalizePaymentStatus(paymentStatus),
-        feeStatusException: normalizeFeeStatusException(feeStatusException)
+        feeStatusException: normalizeFeeStatusException(feeStatusException),
+        manualAccessOverride: true
       },
       { new: true }
     ).lean();

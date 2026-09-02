@@ -158,6 +158,7 @@ test('restricted sync imports only existing courses and does not create sheet co
 
   const originalCourseFind = Course.find;
   const originalCourseBulkWrite = Course.bulkWrite;
+  const originalStudentFind = Student.find;
   const originalStudentBulkWrite = Student.bulkWrite;
   const originalStudentDeleteMany = Student.deleteMany;
   const originalStudentIndexes = Student.collection.indexes;
@@ -173,6 +174,11 @@ test('restricted sync imports only existing courses and does not create sheet co
   Course.bulkWrite = async () => {
     courseBulkWriteCalled = true;
   };
+  Student.find = () => ({
+    select: () => ({
+      lean: async () => []
+    })
+  });
   Student.bulkWrite = async (operations) => {
     writtenStudents.push(...operations.map((operation) => operation.updateOne.update.$set));
   };
@@ -201,11 +207,87 @@ test('restricted sync imports only existing courses and does not create sheet co
     assert.strictEqual(courseBulkWriteCalled, false);
     assert.deepStrictEqual(deleteFilter, {
       lmsId: { $nin: ['LMS001', 'LMS003'] },
-      course: { $in: ['APIDS', 'Sheet Only Course'] }
+      course: { $in: ['APIDS', 'Sheet Only Course'] },
+      manualAccessOverride: { $ne: true }
     });
   } finally {
     Course.find = originalCourseFind;
     Course.bulkWrite = originalCourseBulkWrite;
+    Student.find = originalStudentFind;
+    Student.bulkWrite = originalStudentBulkWrite;
+    Student.deleteMany = originalStudentDeleteMany;
+    Student.collection.indexes = originalStudentIndexes;
+    ClassAccessRule.collection.indexes = originalClassAccessRuleIndexes;
+    fs.rmSync(filePath, { force: true });
+  }
+});
+
+test('sync preserves admin-edited student access when manual override is set', async () => {
+  const filePath = writeWorkbook({
+    Students: [
+      {
+        LMSID: 'LMS001',
+        'STUDENT NAME': 'Allowed Student',
+        MOBILE: '98765 43210',
+        BATCH: 'DV 202604',
+        COURSE: 'APIDS',
+        STATUS: 'CLOSED'
+      }
+    ]
+  });
+
+  const originalCourseFind = Course.find;
+  const originalCourseBulkWrite = Course.bulkWrite;
+  const originalStudentFind = Student.find;
+  const originalStudentBulkWrite = Student.bulkWrite;
+  const originalStudentDeleteMany = Student.deleteMany;
+  const originalStudentIndexes = Student.collection.indexes;
+  const originalClassAccessRuleIndexes = ClassAccessRule.collection.indexes;
+
+  const updates = [];
+
+  Course.find = () => ({
+    lean: async () => [{ courseName: 'APIDS' }, { courseName: 'AIML' }]
+  });
+  Course.bulkWrite = async () => {};
+  Student.find = () => ({
+    select: () => ({
+      lean: async () => [
+        {
+          lmsId: 'LMS001',
+          batch: 'AIML - 202606',
+          batches: ['AIML - 202606'],
+          course: ['AIML'],
+          year: '2026'
+        }
+      ]
+    })
+  });
+  Student.bulkWrite = async (operations) => {
+    updates.push(...operations.map((operation) => operation.updateOne.update));
+  };
+  Student.deleteMany = async () => {};
+  Student.collection.indexes = async () => [];
+  ClassAccessRule.collection.indexes = async () => [];
+
+  try {
+    await syncStudentWorkbookData({
+      studentWorkbookPath: filePath,
+      restrictToExistingCourses: true
+    });
+
+    assert.strictEqual(updates.length, 1);
+    assert.strictEqual(updates[0].$set.name, 'Allowed Student');
+    assert.strictEqual(updates[0].$set.mobile, '9876543210');
+    assert.deepStrictEqual(updates[0].$set.course, ['AIML']);
+    assert.strictEqual(updates[0].$set.batch, 'AIML - 202606');
+    assert.deepStrictEqual(updates[0].$set.batches, ['AIML - 202606']);
+    assert.strictEqual(updates[0].$set.year, '2026');
+    assert.strictEqual(updates[0].$set.manualAccessOverride, true);
+  } finally {
+    Course.find = originalCourseFind;
+    Course.bulkWrite = originalCourseBulkWrite;
+    Student.find = originalStudentFind;
     Student.bulkWrite = originalStudentBulkWrite;
     Student.deleteMany = originalStudentDeleteMany;
     Student.collection.indexes = originalStudentIndexes;

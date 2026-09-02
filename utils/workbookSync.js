@@ -293,6 +293,51 @@ async function getExistingCourseNames() {
   return courses.map((course) => normalizeText(course.courseName)).filter(Boolean);
 }
 
+async function getManualAccessOverrideStudents(lmsIds = []) {
+  if (lmsIds.length === 0) {
+    return new Map();
+  }
+
+  const students = await Student.find({
+    lmsId: { $in: lmsIds },
+    manualAccessOverride: true
+  })
+    .select('lmsId batch batches course year')
+    .lean();
+
+  return new Map(students.map((student) => [student.lmsId, student]));
+}
+
+function buildStudentSyncUpdate(student, manualAccessOverrideStudent = null) {
+  if (!manualAccessOverrideStudent) {
+    return {
+      $set: student,
+      $setOnInsert: {
+        manualAccessOverride: false
+      }
+    };
+  }
+
+  const {
+    batch,
+    batches,
+    course,
+    year,
+    ...sheetFields
+  } = student;
+
+  return {
+    $set: {
+      ...sheetFields,
+      batch: manualAccessOverrideStudent.batch,
+      batches: manualAccessOverrideStudent.batches,
+      course: manualAccessOverrideStudent.course,
+      year: manualAccessOverrideStudent.year,
+      manualAccessOverride: true
+    }
+  };
+}
+
 async function readStudentWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH, options = {}) {
   const workbook = await readWorkbook(filePath);
   const mappings = getStudentSheetMappings(options);
@@ -409,13 +454,14 @@ async function syncStudentsFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH
     : shouldDeleteOnlyMappedCourses
       ? Array.from(new Set(students.flatMap((student) => student.course).filter(Boolean)))
       : getStudentSheetMappings(options).map((mapping) => mapping.courseName).filter(Boolean);
+  const manualAccessOverrideStudents = await getManualAccessOverrideStudents(lmsIds);
 
   if (students.length > 0) {
     await Student.bulkWrite(
       students.map((student) => ({
         updateOne: {
           filter: { lmsId: student.lmsId },
-          update: { $set: student },
+          update: buildStudentSyncUpdate(student, manualAccessOverrideStudents.get(student.lmsId)),
           upsert: true
         }
       })),
@@ -427,7 +473,8 @@ async function syncStudentsFromWorkbook(filePath = DEFAULT_STUDENT_WORKBOOK_PATH
     const deleteFilter = shouldDeleteOnlyMappedCourses
       ? {
         ...(lmsIds.length > 0 ? { lmsId: { $nin: lmsIds } } : {}),
-        course: { $in: mappedCourseNames }
+        course: { $in: mappedCourseNames },
+        manualAccessOverride: { $ne: true }
       }
       : { lmsId: { $nin: lmsIds } };
     await Student.deleteMany(deleteFilter);

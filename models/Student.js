@@ -71,6 +71,11 @@ const studentSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
       index: true
+    },
+    manualAccessOverride: {
+      type: Boolean,
+      default: false,
+      index: true
     }
   },
   {
